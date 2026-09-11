@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VORTEX</title>
+  </head>
+  <body>
+    <canvas id="backdrop"></canvas>
+    <div id="vignette"></div>
+
+    <div id="app">
+      <header class="topbar">
+        <span class="mark">VX</span>
+        <span class="product">VORTEX</span>
+        <span class="phase">태초마을 · 로비</span>
+      </header>
+
+      <section id="screen-home" class="screen">
+        <p class="eyebrow">HERO SHOOTER / LOCAL BOTS</p>
+        <h1>VORTEX</h1>
+        <p class="lede">거점 점령. 솔저: 76과 위도우메이커. 적 봇 둘과 3분.</p>
+        <nav class="menu">
+          <button type="button" data-go="heroes">플레이</button>
+        </nav>
+      </section>
+
+      <section id="screen-heroes" class="screen hidden">
+        <p class="eyebrow">ROSTER</p>
+        <h2>히어로</h2>
+        <p class="lede">키트는 오리지널 실루엣으로만 구현했다. 맵은 로컬 봇전.</p>
+        <div class="roster" id="roster"></div>
+        <nav class="menu">
+          <button type="button" id="btn-enter">훈련장 입장</button>
+          <button type="button" data-go="home" class="ghost">로비</button>
+        </nav>
+        <p class="hint">
+          WASD 이동 · 마우스 조준 · Space 점프 · R 재장전 · Esc 메뉴<br />
+          솔저: 좌클릭 사격 · 우클릭 헬릭스 · Shift 질주 · E 생체장 · Q 궁<br />
+          위도우: 좌클릭 사격 · 우클릭 조준경 · Shift 갈고리 · E 지뢰 · Q 궁
+        </p>
+      </section>
+    </div>
+
+    <div id="hud" class="hidden">
+      <div id="crosshair"></div>
+      <div id="scope" class="hidden"></div>
+      <div id="top-obj">
+        <div id="clock">3:00</div>
+        <div id="caps">
+          <div class="cap ally"><i id="ally-bar"></i></div>
+          <div class="cap enemy"><i id="enemy-bar"></i></div>
+        </div>
+        <div id="obj-label">거점</div>
+      </div>
+      <div id="killfeed"></div>
+      <div id="bottom">
+        <div id="health-wrap">
+          <div id="health-bar"></div>
+          <span id="health-num"></span>
+        </div>
+        <div id="abils"></div>
+        <div id="ammo"></div>
+      </div>
+      <div id="hint"></div>
+    </div>
+
+    <div id="overlay" class="hidden">
+      <div class="panel">
+        <h2 id="overlay-title">일시정지</h2>
+        <p id="overlay-copy"></p>
+        <nav class="menu">
+          <button type="button" id="btn-resume">계속</button>
+          <button type="button" id="btn-lobby" class="ghost">로비</button>
+        </nav>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
