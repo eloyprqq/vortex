@@ -6,6 +6,7 @@ export class Input {
   rmb = false;
   lmbDown = false;
   rmbDown = false;
+  f3Down = false;
   locked = false;
   private canvas: HTMLCanvasElement;
 
@@ -44,6 +45,7 @@ export class Input {
     this.mouseDY = 0;
     this.lmbDown = false;
     this.rmbDown = false;
+    this.f3Down = false;
   }
 
   dispose() {
@@ -58,9 +60,14 @@ export class Input {
   }
 
   private onKeyDown(e: KeyboardEvent) {
+    if (e.code === "F3") {
+      e.preventDefault();
+      if (!e.repeat) this.f3Down = true;
+      return;
+    }
     if (e.repeat) return;
     this.keys.add(e.code);
-    if (["Space", "KeyE", "KeyQ", "KeyR"].includes(e.code)) e.preventDefault();
+    if (["Space", "KeyE", "KeyQ", "KeyR", "KeyV"].includes(e.code)) e.preventDefault();
   }
 
   private onKeyUp(e: KeyboardEvent) {

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { heroById, type HeroId } from "./heroes";
-import type { Spawn } from "./arena";
+import type { Spawn } from "./maps";
 
 export type Team = "ally" | "enemy";
 
@@ -25,6 +25,7 @@ export class Fighter {
   fieldCd = 0;
   grappleCd = 0;
   mineCd = 0;
+  meleeCd = 0;
   ult = 0;
   visorT = 0;
   infraT = 0;
@@ -40,11 +41,15 @@ export class Fighter {
   body!: THREE.Mesh;
   head!: THREE.Mesh;
   outline!: THREE.Mesh;
+  spawn: Spawn;
+  botMoveX = 0;
+  botMoveZ = 0;
 
   constructor(id: string, team: Team, heroId: HeroId, spawn: Spawn) {
     this.id = id;
     this.team = team;
     this.heroId = heroId;
+    this.spawn = spawn;
     const def = heroById(heroId);
     this.maxHealth = def.health;
     this.health = def.health;
@@ -67,12 +72,15 @@ export class Fighter {
     this.fieldCd = 0;
     this.grappleCd = 0;
     this.mineCd = 0;
+    this.meleeCd = 0;
     this.sprinting = false;
     this.scoped = false;
     this.charge = 0;
+    this.botMoveX = 0;
+    this.botMoveZ = 0;
   }
 
-  place(spawn: Spawn) {
+  place(spawn: Spawn = this.spawn) {
     this.group.position.set(spawn.x, spawn.y, spawn.z);
     this.yaw = spawn.yaw;
     this.pitch = 0;
@@ -84,6 +92,8 @@ export class Fighter {
     this.grappleT = 0;
     this.grappleTo = null;
     this.visorT = 0;
+    this.botMoveX = 0;
+    this.botMoveZ = 0;
     this.resetLoadout();
     this.group.visible = true;
   }
@@ -123,32 +133,110 @@ export class Fighter {
     this.head.userData.part = "head";
     this.group.add(this.head);
 
-    const visor = new THREE.Mesh(
-      new THREE.BoxGeometry(slim ? 0.28 : 0.32, 0.08, 0.12),
-      new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.35 }),
-    );
-    visor.position.set(0, this.height - 0.1, slim ? -0.16 : -0.18);
-    this.group.add(visor);
+    if (this.heroId === "widowmaker") this.dressWidow(accent);
+    else this.dressSoldier(accent);
 
-    const rifle = new THREE.Mesh(
-      new THREE.BoxGeometry(slim ? 0.08 : 0.1, 0.1, slim ? 1.35 : 0.85),
-      new THREE.MeshStandardMaterial({ color: 0x1a1f28, roughness: 0.4, metalness: 0.4 }),
-    );
-    rifle.position.set(0.38, this.height * 0.62, slim ? -0.35 : -0.28);
-    this.group.add(rifle);
-
+    const lineColor = this.team === "ally" ? 0x3d9eff : 0xff3b5c;
     this.outline = new THREE.Mesh(
-      new THREE.CapsuleGeometry(slim ? 0.4 : 0.46, slim ? 1.2 : 1.1, 4, 8),
+      new THREE.CapsuleGeometry(slim ? 0.42 : 0.5, slim ? 1.28 : 1.18, 4, 8),
       new THREE.MeshBasicMaterial({
-        color: 0xff4d6a,
+        color: lineColor,
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.9,
         depthTest: false,
+        wireframe: true,
       }),
     );
     this.outline.position.y = this.height * 0.5;
-    this.outline.visible = false;
+    this.outline.visible = true;
     this.outline.renderOrder = 10;
     this.group.add(this.outline);
+  }
+
+  private dressSoldier(accent: number) {
+    const jacket = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.62, 0.42),
+      new THREE.MeshStandardMaterial({ color: 0x2a4a72, roughness: 0.7 }),
+    );
+    jacket.position.y = 1.05;
+    this.group.add(jacket);
+    const pack = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.42, 0.18),
+      new THREE.MeshStandardMaterial({ color: 0x1a2838, roughness: 0.65 }),
+    );
+    pack.position.set(0, 1.08, 0.28);
+    this.group.add(pack);
+    const helm = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.22, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x243044, metalness: 0.35, roughness: 0.4 }),
+    );
+    helm.position.y = this.height - 0.06;
+    this.group.add(helm);
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.1, 0.08),
+      new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.7 }),
+    );
+    visor.position.set(0, this.height - 0.08, -0.2);
+    this.group.add(visor);
+    const rifle = new THREE.Group();
+    const barrel = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.12, 0.95),
+      new THREE.MeshStandardMaterial({ color: 0x1a1f28, metalness: 0.5, roughness: 0.35 }),
+    );
+    const mag = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.22, 0.16),
+      new THREE.MeshStandardMaterial({ color: 0x11141a }),
+    );
+    mag.position.set(0, -0.14, 0.1);
+    const stock = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.16, 0.28),
+      new THREE.MeshStandardMaterial({ color: 0x2a2208 }),
+    );
+    stock.position.z = 0.52;
+    rifle.add(barrel, mag, stock);
+    rifle.position.set(0.42, 0.95, -0.22);
+    this.group.add(rifle);
+  }
+
+  private dressWidow(accent: number) {
+    const suit = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.7, 0.28),
+      new THREE.MeshStandardMaterial({ color: 0x4a1a58, roughness: 0.45, metalness: 0.2 }),
+    );
+    suit.position.y = 1.12;
+    this.group.add(suit);
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0x2a0a18 }),
+    );
+    hair.position.set(0, this.height + 0.02, 0.08);
+    this.group.add(hair);
+    const tail = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.05, 0.45, 4, 6),
+      new THREE.MeshStandardMaterial({ color: 0x2a0a18 }),
+    );
+    tail.position.set(0, this.height - 0.15, 0.28);
+    tail.rotation.x = 0.7;
+    this.group.add(tail);
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.07, 0.08),
+      new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.55 }),
+    );
+    visor.position.set(0, this.height - 0.08, -0.18);
+    this.group.add(visor);
+    const rifle = new THREE.Group();
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.03, 1.7, 8),
+      new THREE.MeshStandardMaterial({ color: 0x1a1218, metalness: 0.6, roughness: 0.3 }),
+    );
+    barrel.rotation.x = Math.PI / 2;
+    const scope = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.1, 0.28),
+      new THREE.MeshStandardMaterial({ color: 0x3a2030, emissive: 0x5a2040, emissiveIntensity: 0.25 }),
+    );
+    scope.position.set(0, 0.1, -0.15);
+    rifle.add(barrel, scope);
+    rifle.position.set(0.34, 1.15, -0.55);
+    this.group.add(rifle);
   }
 }

@@ -17,34 +17,64 @@
       </header>
 
       <section id="screen-home" class="screen">
-        <p class="eyebrow">HERO SHOOTER / LOCAL BOTS</p>
+        <p class="eyebrow">HERO SHOOTER / 5V5 BOTS</p>
         <h1>VORTEX</h1>
-        <p class="lede">거점 점령. 솔저: 76과 위도우메이커. 적 봇 둘과 3분.</p>
+        <p class="lede">먼저 상대 난이도를 고른다. 그다음 맵, 히어로.</p>
         <nav class="menu">
-          <button type="button" data-go="heroes">플레이</button>
+          <button type="button" data-go="diff">플레이</button>
+        </nav>
+      </section>
+
+      <section id="screen-diff" class="screen hidden">
+        <p class="eyebrow">SKILL TIER</p>
+        <h2>난이도</h2>
+        <p class="lede">상대 봇 조준만 바꾼다. 아군 봇은 쉬움에서 더 잘 도와준다.</p>
+        <div class="maps" id="diff-list"></div>
+        <nav class="menu">
+          <button type="button" data-go="maps">이 난이도로</button>
+          <button type="button" data-go="home" class="ghost">로비</button>
+        </nav>
+      </section>
+
+      <section id="screen-maps" class="screen hidden">
+        <p class="eyebrow">CONTROL</p>
+        <h2>맵 선택</h2>
+        <p class="lede" id="vote-copy">맵을 고르면 봇 9명도 투표한다. 시간이 끝나면 룰렛이 돈다.</p>
+        <div class="vote-timer" id="vote-timer">투표 8.0</div>
+        <div class="sides">
+          <div class="side"><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><span>청팀 5</span></div>
+          <div class="side red"><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><span>홍팀 5</span></div>
+        </div>
+        <div class="maps" id="map-list"></div>
+        <nav class="menu">
+          <button type="button" id="btn-after-vote" disabled>히어로 선택</button>
+          <button type="button" data-go="diff" class="ghost">난이도</button>
         </nav>
       </section>
 
       <section id="screen-heroes" class="screen hidden">
-        <p class="eyebrow">ROSTER</p>
+        <p class="eyebrow">ASSEMBLE YOUR TEAM</p>
         <h2>히어로</h2>
-        <p class="lede">키트는 오리지널 실루엣으로만 구현했다. 맵은 로컬 봇전.</p>
+        <p class="lede" id="hero-map-copy">아군 봇 4명이 같이 스폰한다.</p>
         <div class="roster" id="roster"></div>
         <nav class="menu">
-          <button type="button" id="btn-enter">훈련장 입장</button>
-          <button type="button" data-go="home" class="ghost">로비</button>
+          <button type="button" id="btn-enter">출전</button>
+          <button type="button" data-go="maps" class="ghost">맵</button>
         </nav>
         <p class="hint">
-          WASD 이동 · 마우스 조준 · Space 점프 · R 재장전 · Esc 메뉴<br />
-          솔저: 좌클릭 사격 · 우클릭 헬릭스 · Shift 질주 · E 생체장 · Q 궁<br />
-          위도우: 좌클릭 사격 · 우클릭 조준경 · Shift 갈고리 · E 지뢰 · Q 궁
+          WASD · 마우스 · Space · R · V 밀기 · Esc · F3 1/3인칭<br />
+          솔저: 좌클릭 · 우클릭 헬릭스 · Shift 질주 · E 생체장 · Q 궁<br />
+          위도우: 우클릭 유지 조준(차지 100%) · 좌클릭 발사 · Shift 갈고리 · E 지뢰 · Q 궁
         </p>
       </section>
     </div>
 
     <div id="hud" class="hidden">
       <div id="crosshair"></div>
-      <div id="scope" class="hidden"></div>
+      <div id="scope" class="hidden">
+        <div id="charge-ring"><i id="charge-fill"></i></div>
+        <div id="charge-num">0%</div>
+      </div>
       <div id="top-obj">
         <div id="clock">3:00</div>
         <div id="caps">
@@ -52,6 +82,7 @@
           <div class="cap enemy"><i id="enemy-bar"></i></div>
         </div>
         <div id="obj-label">거점</div>
+        <div id="team-count">5 vs 5</div>
       </div>
       <div id="killfeed"></div>
       <div id="bottom">

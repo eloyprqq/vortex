@@ -1,18 +1,17 @@
 import * as THREE from "three";
 import {
-  ALLY_SPAWN,
   buildArena,
   CAPTURE_GOAL,
-  ENEMY_SPAWNS,
   MATCH_SECONDS,
   onPoint,
   resolveMove,
-  WIDOW_PERCH,
   type Aabb,
 } from "./arena";
 import { Fighter } from "./fighter";
 import { heroById, type HeroId } from "./heroes";
 import { Input } from "./input";
+import { difficultyById, type Difficulty, type DifficultyId } from "./difficulty";
+import { mapById, type MapDef, type MapId } from "./maps";
 
 type Rocket = {
   mesh: THREE.Mesh;
@@ -46,6 +45,8 @@ export type HudSnap = {
   visor: boolean;
   infra: boolean;
   scoped: boolean;
+  charge: number;
+  melee: number;
   sprint: boolean;
   hero: HeroId;
   obj: string;
@@ -56,6 +57,9 @@ export type HudSnap = {
   hint: string;
   crosshairHot: boolean;
   feed: string[];
+  firstPerson: boolean;
+  aliveAlly: number;
+  aliveEnemy: number;
 };
 
 export class Match {
@@ -88,49 +92,52 @@ export class Match {
   private botThink = 0;
   private worldHits: THREE.Object3D[] = [];
   private camDist = 4.2;
+  private firstPerson = false;
+  private map: MapDef;
+  private diff: Difficulty;
   result: "win" | "lose" | "draw" | null = null;
   onHud: (s: HudSnap) => void = () => {};
   onPause: (p: boolean) => void = () => {};
   onEnd: (r: "win" | "lose" | "draw") => void = () => {};
   private lastLock = true;
+  private botNav = new Map<string, { x: number; z: number; stuck: number; side: number; avoid: number }>();
 
-  constructor(canvas: HTMLCanvasElement, hero: HeroId) {
+  constructor(canvas: HTMLCanvasElement, hero: HeroId, mapId: MapId, difficultyId: DifficultyId) {
+    this.map = mapById(mapId);
+    this.diff = difficultyById(difficultyId);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.setClearColor(0x0b1018, 1);
-    this.renderer.shadowMap.enabled = true;
-    this.scene.fog = new THREE.Fog(0x0b1018, 18, 48);
-    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 90);
+    this.scene.fog = new THREE.Fog(0x0b1018, this.map.fogNear, this.map.fogFar);
+    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 140);
     this.input = new Input(canvas);
 
-    this.scene.add(new THREE.AmbientLight(0x5a6a80, 0.55));
-    const sun = new THREE.DirectionalLight(0xffe4b5, 1.15);
-    sun.position.set(-10, 18, 8);
-    sun.castShadow = true;
-    sun.shadow.camera.near = 2;
-    sun.shadow.camera.far = 50;
-    sun.shadow.camera.left = -22;
-    sun.shadow.camera.right = 22;
-    sun.shadow.camera.top = 22;
-    sun.shadow.camera.bottom = -22;
+    this.scene.add(new THREE.AmbientLight(0x5a6a80, 0.6));
+    const sun = new THREE.DirectionalLight(0xffe4b5, 1.05);
+    sun.position.set(-14, 28, 12);
     this.scene.add(sun);
 
-    const built = buildArena(this.scene);
+    const built = buildArena(this.scene, this.map);
     this.colliders = built.colliders;
     this.worldHits = built.meshes;
 
-    this.player = new Fighter("you", "ally", hero, ALLY_SPAWN);
+    const allyMix: HeroId[] = ["soldier76", "widowmaker", "soldier76", "widowmaker", "soldier76"];
+    const enemyMix: HeroId[] = ["widowmaker", "soldier76", "widowmaker", "soldier76", "widowmaker"];
+    this.player = new Fighter("you", "ally", hero, this.map.allySpawns[0]);
     this.scene.add(this.player.group);
     this.fighters.push(this.player);
-
-    const other: HeroId = hero === "soldier76" ? "widowmaker" : "soldier76";
-    const bots: [HeroId, HeroId] = [other, hero];
-    bots.forEach((id, i) => {
-      const f = new Fighter(`bot${i}`, "enemy", id, ENEMY_SPAWNS[i]);
+    for (let i = 1; i < 5; i++) {
+      const id = allyMix[i] === hero ? (hero === "soldier76" ? "widowmaker" : "soldier76") : allyMix[i];
+      const f = new Fighter(`ally${i}`, "ally", id, this.map.allySpawns[i]);
       this.scene.add(f.group);
       this.fighters.push(f);
-    });
+    }
+    for (let i = 0; i < 5; i++) {
+      const f = new Fighter(`enemy${i}`, "enemy", enemyMix[i], this.map.enemySpawns[i]);
+      this.scene.add(f.group);
+      this.fighters.push(f);
+    }
 
     this.onResize = () => {
       this.camera.aspect = innerWidth / innerHeight;
@@ -142,6 +149,9 @@ export class Match {
     canvas.addEventListener("click", () => {
       if (!this.ended && !this.paused) this.input.requestLock();
     });
+    this.ray.layers.enable(0);
+    this.ray.layers.enable(2);
+    this.player.outline.visible = false;
   }
 
   start() {
@@ -198,9 +208,13 @@ export class Match {
       this.setPaused(true);
       return;
     }
+    if (this.input.f3Down) {
+      this.firstPerson = !this.firstPerson;
+      this.applyViewLayer();
+    }
     if (!p.alive) {
       p.respawn -= dt;
-      if (p.respawn <= 0) p.place(ALLY_SPAWN);
+      if (p.respawn <= 0) p.place();
       return;
     }
     p.yaw -= this.input.mouseDX * 0.0022;
@@ -208,6 +222,7 @@ export class Match {
     p.pitch = THREE.MathUtils.clamp(p.pitch, -1.15, 1.15);
 
     this.controlHero(p, dt, true);
+    if (this.input.keys.has("KeyV") && p.meleeCd <= 0) this.melee(p);
   }
 
   private controlHero(f: Fighter, dt: number, isPlayer: boolean) {
@@ -236,17 +251,21 @@ export class Match {
         if (this.input.keys.has("KeyS")) this.wish.z += 1;
         if (this.input.keys.has("KeyA")) this.wish.x -= 1;
         if (this.input.keys.has("KeyD")) this.wish.x += 1;
-      } else if (f.sprinting) {
-        this.wish.set(-Math.sin(f.yaw), 0, -Math.cos(f.yaw));
-      }
-      if (this.wish.lengthSq() > 0) {
-        this.wish.normalize();
-        const cs = Math.cos(f.yaw);
-        const sn = Math.sin(f.yaw);
-        const wx = this.wish.x * cs + this.wish.z * sn;
-        const wz = this.wish.z * cs - this.wish.x * sn;
-        f.vel.x = wx * speed;
-        f.vel.z = wz * speed;
+        if (this.wish.lengthSq() > 0) {
+          this.wish.normalize();
+          const cs = Math.cos(f.yaw);
+          const sn = Math.sin(f.yaw);
+          f.vel.x = (this.wish.x * cs + this.wish.z * sn) * speed;
+          f.vel.z = (this.wish.z * cs - this.wish.x * sn) * speed;
+        } else {
+          f.vel.x *= 1 - Math.min(1, dt * 12);
+          f.vel.z *= 1 - Math.min(1, dt * 12);
+        }
+      } else if (f.botMoveX !== 0 || f.botMoveZ !== 0) {
+        this.tmp.set(f.botMoveX, 0, f.botMoveZ);
+        if (this.tmp.lengthSq() > 1) this.tmp.normalize();
+        f.vel.x = this.tmp.x * speed;
+        f.vel.z = this.tmp.z * speed;
       } else {
         f.vel.x *= 1 - Math.min(1, dt * 12);
         f.vel.z *= 1 - Math.min(1, dt * 12);
@@ -255,7 +274,7 @@ export class Match {
         f.vel.y = 8.2;
         f.grounded = false;
       }
-      f.grounded = resolveMove(f.group.position, f.vel, f.radius, f.height, this.colliders, dt);
+      f.grounded = resolveMove(f.group.position, f.vel, f.radius, f.height, this.colliders, dt, this.map.bound);
     }
 
     f.group.rotation.y = f.yaw;
@@ -270,6 +289,7 @@ export class Match {
     f.fieldCd = Math.max(0, f.fieldCd - dt);
     f.grappleCd = Math.max(0, f.grappleCd - dt);
     f.mineCd = Math.max(0, f.mineCd - dt);
+    f.meleeCd = Math.max(0, f.meleeCd - dt);
     f.visorT = Math.max(0, f.visorT - dt);
     f.infraT = Math.max(0, f.infraT - dt);
     if (f.reload > 0) {
@@ -300,19 +320,18 @@ export class Match {
       f.ult = 0;
       f.visorT = 6;
     }
-    if (f.visorT > 0) this.assistAim(f);
+    if (f.visorT > 0 && isPlayer) this.assistAim(f);
 
     const shoot = isPlayer
       ? (this.input.lmb || f.visorT > 0) && !f.sprinting
-      : f.fireCd <= 0;
+      : f.fireCd <= 0 && Math.random() < this.bot(f).fireGate;
     if (shoot) this.firePulse(f);
   }
 
   private tickWidow(f: Fighter, dt: number, isPlayer: boolean) {
-    if (isPlayer && this.input.rmbDown) f.scoped = !f.scoped;
-    if (!isPlayer && f.scoped) f.charge = Math.min(1, f.charge + dt / 0.75);
-    if (isPlayer && f.scoped) f.charge = Math.min(1, f.charge + dt / 0.75);
-    else if (!f.scoped) f.charge = 0;
+    if (isPlayer) f.scoped = this.input.rmb;
+    if (f.scoped) f.charge = Math.min(1, f.charge + dt / 0.85);
+    else f.charge = 0;
 
     if (isPlayer && (this.input.keys.has("ShiftLeft") || this.input.keys.has("ShiftRight")) && f.grappleCd <= 0) {
       this.grapple(f);
@@ -330,6 +349,22 @@ export class Match {
     }
   }
 
+  private melee(f: Fighter) {
+    if (f.meleeCd > 0 || !f.alive) return;
+    f.meleeCd = 1;
+    f.eye(this.tmp);
+    f.lookDir(this.tmp2);
+    for (const o of this.fighters) {
+      if (!o.alive || o.team === f.team) continue;
+      const d = o.group.position.distanceTo(f.group.position);
+      if (d > 2.35) continue;
+      o.eye(this.look);
+      const to = this.look.sub(this.tmp).normalize();
+      if (to.dot(this.tmp2) < 0.15) continue;
+      this.hurt(o, 30, f, true);
+    }
+  }
+
   private firePulse(f: Fighter) {
     if (f.fireCd > 0 || f.reload > 0) return;
     if (f.ammo <= 0) {
@@ -337,8 +372,9 @@ export class Match {
       return;
     }
     f.ammo -= 1;
-    f.fireCd = f.visorT > 0 ? 0.09 : 0.11;
-    const spread = f.visorT > 0 ? 0 : 0.018;
+    const botMul = f === this.player ? 1 : this.bot(f).fire;
+    f.fireCd = (f.visorT > 0 ? 0.09 : 0.11) / botMul;
+    const spread = (f.visorT > 0 && f === this.player ? 0 : 0.018) + (f === this.player ? 0 : this.bot(f).spread);
     this.hitscan(f, 19, 1, spread, 55);
   }
 
@@ -349,14 +385,15 @@ export class Match {
       return;
     }
     f.ammo -= 1;
+    const extra = f === this.player ? 0 : this.bot(f).spread;
     if (f.scoped) {
-      f.fireCd = 0.55;
+      f.fireCd = 0.55 / (f === this.player ? 1 : this.bot(f).fire);
       const dmg = 12 + 108 * f.charge;
-      this.hitscan(f, dmg, 2.5, 0, 80);
+      this.hitscan(f, dmg, 2.5, 0.02 + extra * 0.6, 80);
       f.charge = 0;
     } else {
-      f.fireCd = 0.12;
-      this.hitscan(f, 13, 1, 0.03, 40);
+      f.fireCd = 0.12 / (f === this.player ? 1 : this.bot(f).fire);
+      this.hitscan(f, 13, 1, 0.03 + extra, 40);
     }
   }
 
@@ -371,6 +408,10 @@ export class Match {
     this.tracer(this.ray.ray.origin, this.ray.ray.direction, first.distance, 0xffe08a);
     const target = first.object.userData.hit as Fighter | undefined;
     if (!target || !target.alive || target.team === f.team) return;
+    if (f !== this.player && Math.random() > this.bot(f).hit) {
+      this.tracer(this.ray.ray.origin, this.ray.ray.direction, first.distance, 0x8b9bb0);
+      return;
+    }
     const part = first.object.userData.part as string;
     const dealt = part === "head" ? damage * headMul : damage;
     this.hurt(target, dealt, f, true);
@@ -393,7 +434,7 @@ export class Match {
 
   private fireHelix(f: Fighter) {
     f.helixCd = 6;
-    this.aimRay(f, 0);
+    this.aimRay(f, f === this.player ? 0 : this.bot(f).spread * 1.4);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.14, 10, 8),
       new THREE.MeshBasicMaterial({ color: 0xffb703 }),
@@ -424,7 +465,7 @@ export class Match {
   private grapple(f: Fighter) {
     this.aimRay(f, 0);
     const hits = this.ray.intersectObjects(this.worldHits, false);
-    const hit = hits.find((h) => h.distance > 2 && h.distance < 24);
+    const hit = hits.find((h) => h.distance > 2 && h.distance < 36);
     if (!hit) return;
     f.grappleCd = 12;
     f.grappleT = 0.38;
@@ -512,9 +553,10 @@ export class Match {
       }
     }
 
-    const infra = this.player.infraT > 0;
     for (const f of this.fighters) {
-      f.outline.visible = infra && f.team === "enemy" && f.alive;
+      f.outline.visible = f !== this.player && f.alive;
+      const mat = f.outline.material as THREE.MeshBasicMaterial;
+      mat.opacity = this.player.infraT > 0 && f.team === "enemy" ? 1 : 0.82;
     }
   }
 
@@ -568,43 +610,82 @@ export class Match {
     }
   }
 
+  private applyViewLayer() {
+    this.player.group.traverse((o) => {
+      o.layers.set(this.firstPerson ? 2 : 0);
+    });
+    this.ray.layers.enable(0);
+    this.ray.layers.enable(2);
+  }
+
+  private nearestFoe(f: Fighter): Fighter | null {
+    let best: Fighter | null = null;
+    let bestD = 1e9;
+    for (const o of this.fighters) {
+      if (!o.alive || o.team === f.team) continue;
+      const d = o.group.position.distanceTo(f.group.position);
+      if (d < bestD) {
+        bestD = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
   private tickBots(dt: number) {
     this.botThink -= dt;
     const think = this.botThink <= 0;
     if (think) this.botThink = 0.12;
     for (const f of this.fighters) {
-      if (f.team !== "enemy") continue;
+      if (f === this.player) continue;
       if (!f.alive) {
         f.respawn -= dt;
-        if (f.respawn <= 0) {
-          const spawn = ENEMY_SPAWNS[f.id === "bot0" ? 0 : 1];
-          f.place(spawn);
-        }
+        if (f.respawn <= 0) f.place();
         continue;
       }
       if (think) this.steerBot(f);
       this.controlHero(f, dt, false);
+      const foe = this.nearestFoe(f);
+      if (foe && f.meleeCd <= 0 && f.group.position.distanceTo(foe.group.position) < 2.15) {
+        this.lookAt(f, foe);
+        this.melee(f);
+      }
       if (f.heroId === "soldier76") {
-        if (f.helixCd <= 0 && this.player.alive && f.group.position.distanceTo(this.player.group.position) < 18) {
-          this.lookAt(f, this.player);
+        if (
+          foe &&
+          f.helixCd <= 0 &&
+          f.group.position.distanceTo(foe.group.position) < 18 &&
+          Math.random() < (f.team === "enemy" ? this.diff.enemyHelix : 0.5)
+        ) {
+          this.lookAt(f, foe);
           this.fireHelix(f);
         }
         if (f.fieldCd <= 0 && f.health < f.maxHealth * 0.55) this.dropField(f);
-        if (f.ult >= 100) {
+        if (f.ult >= 100 && (f.team === "ally" || this.diff.enemyUlt)) {
           f.ult = 0;
           f.visorT = 6;
         }
-      } else {
-        const d = f.group.position.distanceTo(this.player.group.position);
-        f.scoped = d > 9 && this.canSee(f, this.player);
-        if (f.grappleCd <= 0 && f.group.position.y < 2.5 && Math.random() < 0.08) {
-          f.grappleCd = 12;
-          f.grappleT = 0.45;
-          f.grappleTo = WIDOW_PERCH.clone();
+      } else if (foe) {
+        const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
+        const d = f.group.position.distanceTo(foe.group.position);
+        f.scoped = onCap && d > 10 && this.canSee(f, foe);
+        if (f.team === "ally") {
+          const perch = this.map.allyPerch;
+          if (f.grappleCd <= 0 && f.group.position.y < 2.5 && Math.random() < 0.05) {
+            f.grappleCd = 12;
+            f.grappleT = 0.45;
+            f.grappleTo = perch.clone();
+          }
+        } else if (!onCap && f.grappleCd <= 0 && f.group.position.distanceTo(this.tmp.set(0, 0, 0)) > 14 && Math.random() < 0.08) {
+          this.faceToward(f, this.tmp.set(0, 0, 0));
+          this.grapple(f);
         }
-        if (f.mineCd <= 0 && onPoint(f.group.position.x, f.group.position.z)) this.placeMine(f);
-        if (this.player.alive && f.fireCd <= 0 && this.canSee(f, this.player)) this.fireWidow(f);
-        if (f.ult >= 100) {
+        if (f.mineCd <= 0 && onCap) this.placeMine(f);
+        if (f.fireCd <= 0 && this.canSee(f, foe) && Math.random() < this.bot(f).fireGate) {
+          this.lookAt(f, foe);
+          this.fireWidow(f);
+        }
+        if (f.ult >= 100 && (f.team === "ally" || this.diff.enemyUlt)) {
           f.ult = 0;
           f.infraT = 12;
         }
@@ -612,26 +693,102 @@ export class Match {
     }
   }
 
+  private pointSlot(f: Fighter): THREE.Vector3 {
+    const pack = this.fighters.filter((x) => x.team === f.team && x !== this.player);
+    const i = Math.max(0, pack.indexOf(f));
+    const ang = (i / Math.max(1, pack.length)) * Math.PI * 2 + (f.team === "enemy" ? 0.7 : 0);
+    const r = this.map.captureR * 0.38;
+    return this.tmp2.set(Math.cos(ang) * r, 0, Math.sin(ang) * r);
+  }
+
+  private enemiesOnPoint(): number {
+    let n = 0;
+    for (const f of this.fighters) {
+      if (f.team !== "enemy" || !f.alive) continue;
+      if (onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) n += 1;
+    }
+    return n;
+  }
+
   private steerBot(f: Fighter) {
-    const p = this.player;
-    const see = p.alive && this.canSee(f, p);
-    if (f.heroId === "widowmaker" && f.group.position.distanceTo(WIDOW_PERCH) > 3 && f.group.position.y < 3) {
-      this.faceToward(f, WIDOW_PERCH);
-      f.sprinting = true;
+    const foe = this.nearestFoe(f);
+    const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
+    const slot = this.pointSlot(f).clone();
+
+    const sniper =
+      f.team === "enemy" && f.heroId === "widowmaker" && f.id === "enemy0" && this.enemiesOnPoint() >= 3;
+    if (sniper) {
+      this.faceToward(f, this.map.enemyPerch);
+      this.setBotMove(f, this.map.enemyPerch.x, this.map.enemyPerch.z, 1.4);
+      if (foe) this.lookAt(f, foe);
       return;
     }
-    if (see && f.heroId === "soldier76") {
-      this.lookAt(f, p);
-      f.sprinting = f.group.position.distanceTo(p.group.position) > 11;
+
+    if (f.team === "ally" && f.heroId === "widowmaker" && !onCap && this.enemiesOnPoint() < 2) {
+      const perch = this.map.allyPerch;
+      if (f.group.position.distanceTo(perch) > 4 && f.group.position.y < 3) {
+        this.faceToward(f, perch);
+        this.setBotMove(f, perch.x, perch.z, 1.2);
+        return;
+      }
+    }
+
+    if (!onCap) {
+      this.setBotMove(f, slot.x, slot.z, 1.6);
+      f.sprinting = true;
+      f.scoped = false;
+      if (foe && this.canSee(f, foe) && f.group.position.distanceTo(foe.group.position) < 16) {
+        this.lookAt(f, foe);
+      } else {
+        this.faceToward(f, slot);
+      }
       return;
     }
-    if (!onPoint(f.group.position.x, f.group.position.z)) {
-      this.faceToward(f, new THREE.Vector3(0, 0, 0));
+
+    const inner = this.map.captureR * 0.55;
+    if (!onPoint(f.group.position.x, f.group.position.z, inner)) {
+      this.setBotMove(f, slot.x, slot.z, 0.9);
       f.sprinting = true;
-    } else if (see) {
-      this.lookAt(f, p);
+    } else {
+      this.setBotMove(f, 0, 0, 0);
       f.sprinting = false;
     }
+    if (foe && this.canSee(f, foe)) this.lookAt(f, foe);
+  }
+
+  private setBotMove(f: Fighter, tx: number, tz: number, rush: number) {
+    const px = f.group.position.x;
+    const pz = f.group.position.z;
+    let dx = tx - px;
+    let dz = tz - pz;
+    const nav = this.botNav.get(f.id) ?? { x: px, z: pz, stuck: 0, side: 1, avoid: 0 };
+    const moved = Math.hypot(px - nav.x, pz - nav.z);
+    if (rush > 0 && Math.hypot(dx, dz) > 1 && moved < 0.16) nav.stuck += 0.12;
+    else nav.stuck = 0;
+    if (nav.stuck > 0.3) {
+      nav.side *= -1;
+      nav.stuck = 0;
+      nav.avoid = 0.9;
+    }
+    nav.avoid = Math.max(0, nav.avoid - 0.12);
+    nav.x = px;
+    nav.z = pz;
+    this.botNav.set(f.id, nav);
+    const len = Math.hypot(dx, dz) || 1;
+    if (nav.avoid > 0) {
+      const ox = (-dz / len) * 7 * nav.side;
+      const oz = (dx / len) * 7 * nav.side;
+      dx += ox;
+      dz += oz;
+    }
+    const dist = Math.hypot(dx, dz);
+    if (dist < 0.55 || rush === 0) {
+      f.botMoveX = 0;
+      f.botMoveZ = 0;
+      return;
+    }
+    f.botMoveX = (dx / dist) * rush;
+    f.botMoveZ = (dz / dist) * rush;
   }
 
   private canSee(a: Fighter, b: Fighter) {
@@ -644,12 +801,24 @@ export class Match {
     return !walls.length || walls[0].distance > dist - 0.4;
   }
 
+  private bot(f: Fighter) {
+    const enemy = f.team === "enemy";
+    return {
+      spread: enemy ? this.diff.enemySpread : this.diff.allySpread,
+      hit: enemy ? this.diff.enemyHit : this.diff.allyHit,
+      fire: enemy ? this.diff.enemyFire : this.diff.allyFire,
+      jitter: enemy ? this.diff.enemyJitter : this.diff.allyJitter,
+      fireGate: enemy ? 0.55 : 0.8,
+    };
+  }
+
   private lookAt(f: Fighter, t: Fighter) {
     t.eye(this.tmp2);
     f.eye(this.tmp);
     const dir = this.tmp2.sub(this.tmp).normalize();
-    f.yaw = Math.atan2(-dir.x, -dir.z);
-    f.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+    const j = this.bot(f).jitter;
+    f.yaw = Math.atan2(-dir.x, -dir.z) + (Math.random() - 0.5) * j;
+    f.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) + (Math.random() - 0.5) * j * 0.45;
   }
 
   private faceToward(f: Fighter, t: THREE.Vector3) {
@@ -664,14 +833,14 @@ export class Match {
     let enemy = 0;
     for (const f of this.fighters) {
       if (!f.alive) continue;
-      if (!onPoint(f.group.position.x, f.group.position.z)) continue;
+      if (!onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) continue;
       if (f.team === "ally") ally += 1;
       else enemy += 1;
     }
     const contested = ally > 0 && enemy > 0;
     if (!contested) {
-      if (ally > 0) this.allyCap = Math.min(CAPTURE_GOAL, this.allyCap + dt * 7.5 * ally);
-      if (enemy > 0) this.enemyCap = Math.min(CAPTURE_GOAL, this.enemyCap + dt * 6.2 * Math.min(enemy, 2));
+      if (ally > 0) this.allyCap = Math.min(CAPTURE_GOAL, this.allyCap + dt * 3.4 * Math.min(ally, 3));
+      if (enemy > 0) this.enemyCap = Math.min(CAPTURE_GOAL, this.enemyCap + dt * 3.4 * Math.min(enemy, 3));
     }
     if (this.allyCap >= CAPTURE_GOAL) this.endMatch("win");
     else if (this.enemyCap >= CAPTURE_GOAL) this.endMatch("lose");
@@ -694,9 +863,17 @@ export class Match {
   private updateCamera(dt: number) {
     const p = this.player;
     const scoped = p.alive && p.heroId === "widowmaker" && p.scoped;
-    const fov = scoped ? 28 : p.visorT > 0 ? 58 : 62;
+    const fov = scoped ? 28 : this.firstPerson ? 75 : p.visorT > 0 ? 58 : 62;
     this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 8);
     this.camera.updateProjectionMatrix();
+    p.lookDir(this.look);
+    if (this.firstPerson) {
+      p.eye(this.camGoal);
+      this.camera.position.copy(this.camGoal);
+      this.tmp2.copy(this.camGoal).addScaledVector(this.look, 10);
+      this.camera.lookAt(this.tmp2);
+      return;
+    }
     const dist = scoped ? 2.4 : this.camDist;
     const offX = scoped ? 0.18 : 0.85;
     const cy = Math.cos(p.pitch);
@@ -708,7 +885,6 @@ export class Match {
     this.camGoal.copy(p.group.position).add(behind);
     if (this.camGoal.y < 0.4) this.camGoal.y = 0.4;
     this.camera.position.lerp(this.camGoal, 1 - Math.pow(0.0002, dt));
-    p.lookDir(this.look);
     this.tmp2.copy(p.group.position).add(this.tmp.set(0, p.height * 0.78, 0)).addScaledVector(this.look, 8);
     this.camera.lookAt(this.tmp2);
   }
@@ -722,7 +898,7 @@ export class Match {
     let enemy = 0;
     for (const f of this.fighters) {
       if (!f.alive) continue;
-      if (!onPoint(f.group.position.x, f.group.position.z)) continue;
+      if (!onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) continue;
       if (f.team === "ally") ally += 1;
       else enemy += 1;
     }
@@ -730,6 +906,13 @@ export class Match {
     const hover = this.ray.intersectObjects(this.hitables(this.player), false)[0];
     const hot = !!(hover && (hover.object.userData.hit as Fighter).team === "enemy");
     const p = this.player;
+    let aliveAlly = 0;
+    let aliveEnemy = 0;
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      if (f.team === "ally") aliveAlly += 1;
+      else aliveEnemy += 1;
+    }
     this.onHud({
       health: Math.max(0, p.health),
       maxHealth: p.maxHealth,
@@ -742,6 +925,8 @@ export class Match {
       visor: p.visorT > 0,
       infra: p.infraT > 0,
       scoped: p.scoped,
+      charge: p.charge,
+      melee: p.meleeCd,
       sprint: p.sprinting,
       hero: p.heroId,
       obj:
@@ -756,9 +941,18 @@ export class Match {
       enemyCap: this.enemyCap,
       time: Math.max(0, this.timeLeft),
       contested: ally > 0 && enemy > 0,
-      hint: p.alive ? (this.input.locked ? "" : "클릭해서 조준 잠금") : `${p.respawn.toFixed(1)}초 후 리스폰`,
+      hint: p.alive
+        ? this.input.locked
+          ? this.firstPerson
+            ? "F3 3인칭"
+            : "F3 1인칭"
+          : "클릭해서 조준 잠금 · F3 시점"
+        : `${p.respawn.toFixed(1)}초 후 리스폰`,
       crosshairHot: hot,
       feed: this.feed.map((x) => x.text),
+      firstPerson: this.firstPerson,
+      aliveAlly,
+      aliveEnemy,
     });
   }
 }

@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import type { MapDef, Prop } from "./maps";
+
+export type { Spawn } from "./maps";
 
 export type Aabb = {
   minx: number;
@@ -9,43 +12,10 @@ export type Aabb = {
   maxz: number;
 };
 
-export type Spawn = { x: number; y: number; z: number; yaw: number };
-
-export const CAPTURE = { x: 0, z: 0, radius: 4.4 };
 export const MATCH_SECONDS = 180;
 export const CAPTURE_GOAL = 100;
 
-export const ALLY_SPAWN: Spawn = { x: 0, y: 0, z: 15.5, yaw: Math.PI };
-export const ENEMY_SPAWNS: Spawn[] = [
-  { x: -3.2, y: 0, z: -15.2, yaw: 0 },
-  { x: 3.2, y: 0, z: -15.2, yaw: 0 },
-];
-
-export const WIDOW_PERCH = new THREE.Vector3(0, 4.15, -16.4);
-
-const PROPS: { x: number; y: number; z: number; w: number; h: number; d: number }[] = [
-  { x: 0, y: 0.55, z: 8.2, w: 4.2, h: 1.1, d: 1.15 },
-  { x: 6.2, y: 0.75, z: 3.4, w: 2.2, h: 1.5, d: 1.6 },
-  { x: -6.4, y: 0.75, z: 2.6, w: 2.4, h: 1.5, d: 1.8 },
-  { x: 5.1, y: 0.65, z: -4.8, w: 2.8, h: 1.3, d: 1.3 },
-  { x: -5.4, y: 0.65, z: -5.2, w: 2.6, h: 1.3, d: 1.4 },
-  { x: 9.5, y: 1.5, z: -1, w: 1.4, h: 3, d: 8 },
-  { x: -9.5, y: 1.5, z: -1, w: 1.4, h: 3, d: 8 },
-  { x: 0, y: 2.05, z: -16.6, w: 9, h: 0.35, d: 6.2 },
-  { x: 0, y: 3.1, z: -19.4, w: 9, h: 2.4, d: 0.45 },
-  { x: -4.6, y: 3.1, z: -16.6, w: 0.45, h: 2.4, d: 6.2 },
-  { x: 4.6, y: 3.1, z: -16.6, w: 0.45, h: 2.4, d: 6.2 },
-  { x: -1.6, y: 0.45, z: -12.1, w: 1.8, h: 0.9, d: 1.6 },
-  { x: -1.6, y: 1.15, z: -13.3, w: 1.8, h: 0.9, d: 1.6 },
-  { x: -1.6, y: 1.85, z: -14.5, w: 1.8, h: 0.9, d: 1.6 },
-  { x: -1.6, y: 2.55, z: -15.6, w: 1.8, h: 0.9, d: 1.6 },
-  { x: 18.2, y: 3, z: 0, w: 0.6, h: 6, d: 38 },
-  { x: -18.2, y: 3, z: 0, w: 0.6, h: 6, d: 38 },
-  { x: 0, y: 3, z: 18.8, w: 37, h: 6, d: 0.6 },
-  { x: 0, y: 3, z: -20.6, w: 37, h: 6, d: 0.6 },
-];
-
-export function aabbFromProp(p: (typeof PROPS)[number]): Aabb {
+export function aabbFromProp(p: Prop): Aabb {
   return {
     minx: p.x - p.w / 2,
     maxx: p.x + p.w / 2,
@@ -56,21 +26,23 @@ export function aabbFromProp(p: (typeof PROPS)[number]): Aabb {
   };
 }
 
-export function buildArena(scene: THREE.Scene): { colliders: Aabb[]; meshes: THREE.Object3D[] } {
-  const colliders = PROPS.map(aabbFromProp);
+export function buildArena(
+  scene: THREE.Scene,
+  map: MapDef,
+): { colliders: Aabb[]; meshes: THREE.Object3D[] } {
+  const colliders = map.props.map(aabbFromProp);
   const meshes: THREE.Object3D[] = [];
 
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(22, 64),
-    new THREE.MeshStandardMaterial({ color: 0x1a2738, roughness: 0.92 }),
+    new THREE.CircleGeometry(map.floorR, 72),
+    new THREE.MeshStandardMaterial({ color: map.floor, roughness: 0.92 }),
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
   scene.add(floor);
   meshes.push(floor);
 
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(CAPTURE.radius - 0.12, CAPTURE.radius + 0.08, 64),
+    new THREE.RingGeometry(map.captureR - 0.14, map.captureR + 0.1, 64),
     new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide }),
   );
   ring.rotation.x = -Math.PI / 2;
@@ -79,24 +51,28 @@ export function buildArena(scene: THREE.Scene): { colliders: Aabb[]; meshes: THR
   meshes.push(ring);
 
   const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(CAPTURE.radius - 0.15, 48),
-    new THREE.MeshStandardMaterial({ color: 0x24344c, roughness: 0.8, emissive: 0x1a1404, emissiveIntensity: 0.25 }),
+    new THREE.CircleGeometry(map.captureR - 0.18, 48),
+    new THREE.MeshStandardMaterial({
+      color: 0x24344c,
+      roughness: 0.8,
+      emissive: 0x1a1404,
+      emissiveIntensity: 0.25,
+    }),
   );
   pad.rotation.x = -Math.PI / 2;
   pad.position.y = 0.02;
   scene.add(pad);
   meshes.push(pad);
 
-  const boxMat = new THREE.MeshStandardMaterial({ color: 0x2a3d54, roughness: 0.82 });
+  const boxMat = new THREE.MeshStandardMaterial({ color: map.block, roughness: 0.82 });
+  const nestMat = new THREE.MeshStandardMaterial({ color: map.nest, roughness: 0.78 });
 
-  for (const p of PROPS) {
-    const mat = Math.abs(p.z + 16.6) < 4 && p.y > 1.8
-      ? new THREE.MeshStandardMaterial({ color: 0x3a2a48, roughness: 0.78 })
-      : boxMat;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), mat);
+  for (const p of map.props) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(p.w, p.h, p.d),
+      p.nest ? nestMat : boxMat,
+    );
     mesh.position.set(p.x, p.y, p.z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
     scene.add(mesh);
     meshes.push(mesh);
   }
@@ -104,10 +80,8 @@ export function buildArena(scene: THREE.Scene): { colliders: Aabb[]; meshes: THR
   return { colliders, meshes };
 }
 
-export function onPoint(x: number, z: number): boolean {
-  const dx = x - CAPTURE.x;
-  const dz = z - CAPTURE.z;
-  return dx * dx + dz * dz <= CAPTURE.radius * CAPTURE.radius;
+export function onPoint(x: number, z: number, radius: number): boolean {
+  return x * x + z * z <= radius * radius;
 }
 
 export function resolveMove(
@@ -117,15 +91,15 @@ export function resolveMove(
   height: number,
   colliders: Aabb[],
   dt: number,
+  bound: number,
 ): boolean {
   vel.y -= 22 * dt;
   pos.x += vel.x * dt;
   pos.z += vel.z * dt;
   pos.y += vel.y * dt;
 
-  const limit = 17.4;
-  pos.x = THREE.MathUtils.clamp(pos.x, -limit, limit);
-  pos.z = THREE.MathUtils.clamp(pos.z, -19.6, 17.6);
+  pos.x = THREE.MathUtils.clamp(pos.x, -bound, bound);
+  pos.z = THREE.MathUtils.clamp(pos.z, -bound, bound);
 
   let grounded = false;
   if (pos.y <= 0) {
