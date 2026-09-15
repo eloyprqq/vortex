@@ -316,16 +316,64 @@ body.playing #vignette {
 }
 
 #health-bar {
-  height: 14px;
-  background: #1a2433;
+  width: 260px;
+  height: 16px;
 }
 
-#health-bar::after {
-  content: "";
+.ow-hp {
+  position: relative;
+  height: 10px;
+  background: #161616;
+  border: 1px solid #050505;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.ow-hp .hp-fill {
   display: block;
   height: 100%;
   width: var(--hp, 100%);
-  background: #7bed9f;
+  background: linear-gradient(#f8f3e6, #ddd6c4);
+}
+
+.ow-hp .hp-ticks i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #3dba6a;
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.35);
+}
+
+.ow-hp .hp-ticks i.major {
+  width: 2px;
+  background: #2f9e54;
+}
+
+#hp-floats {
+  position: absolute;
+  inset: 0;
+}
+
+.hp-float {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.hp-float .ow-hp {
+  width: 84px;
+  height: 8px;
+}
+
+.hp-float.enemy .hp-ticks i {
+  background: #e85d4c;
+}
+
+.hp-float.enemy .hp-ticks i.major {
+  background: #c94436;
 }
 
 #health-num {
@@ -548,12 +596,13 @@ body.playing #vignette {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 90px;
-  height: 90px;
-  margin: -45px 0 0 -45px;
-  border: 2px solid #2a3a50;
+  width: 92px;
+  height: 92px;
+  margin: -46px 0 0 -46px;
+  border: 3px solid rgba(155, 28, 46, 0.3);
   border-radius: 50%;
   overflow: hidden;
+  background: rgba(74, 14, 22, 0.3);
 }
 
 #charge-fill {
@@ -562,14 +611,158 @@ body.playing #vignette {
   right: 0;
   bottom: 0;
   height: 0;
-  background: #f5c518;
+  background: rgba(227, 28, 61, 0.3);
 }
 
 #charge-num {
   position: absolute;
   left: 50%;
-  top: calc(50% + 58px);
+  top: calc(50% + 60px);
   transform: translateX(-50%);
   font-weight: 800;
   letter-spacing: 0.12em;
+  color: #e31c3d;
+}
+
+.ticket-wrap {
+  margin: 8px 0 20px;
+}
+
+.ticket-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#ticket-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.ticket {
+  width: 22px;
+  height: 32px;
+  border: 1px solid var(--line);
+}
+
+.ticket.horizon {
+  background: #2a5a6a;
+}
+
+.ticket.streets {
+  background: #4a3a58;
+}
+
+.ticket.ruins {
+  background: #5a4a30;
+}
+
+.ticket.on {
+  outline: 2px solid #f5c518;
+}
+
+.ticket.win {
+  background: #f5c518;
+}
+
+#kill-mark {
+  position: absolute;
+  left: 50%;
+  top: auto;
+  bottom: 96px;
+  width: 48px;
+  height: 48px;
+  margin: 0 0 0 -24px;
+  opacity: 0;
+  transform: scale(0.84);
+  filter: drop-shadow(0 0 8px rgba(227, 28, 61, 0.8));
+  transition: opacity 0.15s linear, transform 0.15s ease;
+}
+
+#kill-mark.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+#kill-mark .skull {
+  position: absolute;
+  inset: 0;
+  width: 48px;
+  height: 48px;
+}
+
+#kill-mark .gem {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  background: #e31c3d;
+}
+
+#kill-mark.head .gem {
+  display: block;
+  animation: gems 0.85s linear infinite;
+}
+
+#kill-mark.head .g1 { --a: 0deg; }
+#kill-mark.head .g2 { --a: 90deg; }
+#kill-mark.head .g3 { --a: 180deg; }
+#kill-mark.head .g4 { --a: 270deg; }
+
+@keyframes gems {
+  from { transform: rotate(var(--a, 0deg)) translate(34px) rotate(45deg); }
+  to { transform: rotate(calc(var(--a, 0deg) + 360deg)) translate(34px) rotate(45deg); }
+}
+
+.ticket-wrap {
+  margin: 8px 0 20px;
+}
+
+.ticket-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#ticket-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.ticket {
+  width: 22px;
+  height: 32px;
+  border: 1px solid var(--line);
+}
+
+.ticket.horizon {
+  background: #2a5a6a;
+}
+
+.ticket.streets {
+  background: #4a3a58;
+}
+
+.ticket.ruins {
+  background: #5a4a30;
+}
+
+.ticket.on {
+  outline: 2px solid #f5c518;
+}
+
+.ticket.win {
+  outline: 2px solid #f5c518;
+  background: #f5c518;
 }

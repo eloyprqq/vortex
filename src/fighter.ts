@@ -44,6 +44,10 @@ export class Fighter {
   spawn: Spawn;
   botMoveX = 0;
   botMoveZ = 0;
+  kills = 0;
+  deaths = 0;
+  assists = 0;
+  hits: { id: string; team: Team; t: number }[] = [];
 
   constructor(id: string, team: Team, heroId: HeroId, spawn: Spawn) {
     this.id = id;
@@ -124,6 +128,20 @@ export class Fighter {
     this.body.userData.part = "body";
     this.group.add(this.body);
 
+    const lineColor = this.team === "ally" ? 0x3d9eff : 0xff3b5c;
+    this.outline = new THREE.Mesh(
+      new THREE.CapsuleGeometry(slim ? 0.36 : 0.44, slim ? 1.18 : 1.08, 8, 14),
+      new THREE.MeshBasicMaterial({
+        color: lineColor,
+        side: THREE.BackSide,
+        depthWrite: false,
+      }),
+    );
+    this.outline.position.y = this.height * 0.5;
+    this.outline.scale.setScalar(1.06);
+    this.outline.renderOrder = 9;
+    this.group.add(this.outline);
+
     this.head = new THREE.Mesh(
       new THREE.SphereGeometry(slim ? 0.2 : 0.22, 12, 10),
       new THREE.MeshStandardMaterial({ color: slim ? 0xc4a07a : 0xc9b39a, roughness: 0.6 }),
@@ -135,22 +153,6 @@ export class Fighter {
 
     if (this.heroId === "widowmaker") this.dressWidow(accent);
     else this.dressSoldier(accent);
-
-    const lineColor = this.team === "ally" ? 0x3d9eff : 0xff3b5c;
-    this.outline = new THREE.Mesh(
-      new THREE.CapsuleGeometry(slim ? 0.42 : 0.5, slim ? 1.28 : 1.18, 4, 8),
-      new THREE.MeshBasicMaterial({
-        color: lineColor,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: false,
-        wireframe: true,
-      }),
-    );
-    this.outline.position.y = this.height * 0.5;
-    this.outline.visible = true;
-    this.outline.renderOrder = 10;
-    this.group.add(this.outline);
   }
 
   private dressSoldier(accent: number) {

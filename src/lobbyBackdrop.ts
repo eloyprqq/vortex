@@ -94,9 +94,11 @@ export function createLobbyBackdrop(canvas: HTMLCanvasElement) {
   camera.lookAt(look);
 
   let raf = 0;
+  let stopped = false;
   const clock = new THREE.Clock();
 
   function frame() {
+    if (stopped) return;
     const t = clock.getElapsedTime();
     camera.position.x = -6 + Math.sin(t * 0.12) * 0.45;
     camera.position.y = 3.2 + Math.sin(t * 0.18) * 0.12;
@@ -117,6 +119,8 @@ export function createLobbyBackdrop(canvas: HTMLCanvasElement) {
   frame();
 
   return () => {
+    if (stopped) return;
+    stopped = true;
     cancelAnimationFrame(raf);
     window.removeEventListener("resize", onResize);
     renderer.dispose();

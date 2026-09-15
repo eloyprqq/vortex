@@ -4,6 +4,8 @@ import {
   CAPTURE_GOAL,
   MATCH_SECONDS,
   onPoint,
+  PUSH_PATH,
+  PUSH_RADIUS,
   resolveMove,
   type Aabb,
 } from "./arena";
@@ -46,7 +48,6 @@ export type HudSnap = {
   infra: boolean;
   scoped: boolean;
   charge: number;
-  melee: number;
   sprint: boolean;
   hero: HeroId;
   obj: string;
@@ -57,9 +58,13 @@ export type HudSnap = {
   hint: string;
   crosshairHot: boolean;
   feed: string[];
-  firstPerson: boolean;
+  hpBars: { id: string; x: number; y: number; health: number; maxHealth: number; ally: boolean }[];
   aliveAlly: number;
   aliveEnemy: number;
+  mode: "control" | "push";
+  k: number;
+  d: number;
+  a: number;
 };
 
 export class Match {
@@ -76,12 +81,11 @@ export class Match {
   private ray = new THREE.Raycaster();
   private ndc = new THREE.Vector2(0, 0);
   private wish = new THREE.Vector3();
-  private look = new THREE.Vector3();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
-  private camGoal = new THREE.Vector3();
   private clock = new THREE.Clock();
   private raf = 0;
+  private live = true;
   private onResize: () => void;
   private paused = false;
   private ended = false;
@@ -91,15 +95,27 @@ export class Match {
   private feed: { t: number; text: string }[] = [];
   private botThink = 0;
   private worldHits: THREE.Object3D[] = [];
-  private camDist = 4.2;
-  private firstPerson = false;
+  private viewGun = new THREE.Group();
+  private viewField = new THREE.Group();
+  private viewGrapple = new THREE.Group();
+  private viewScene = new THREE.Scene();
+  private viewCamera: THREE.PerspectiveCamera;
+  private viewAct: "idle" | "field" | "grapple" = "idle";
+  private viewActT = 0;
+  private fieldArmed = false;
+  private grappleLine: THREE.Line | null = null;
+  private hpReveal = new Map<string, number>();
   private map: MapDef;
   private diff: Difficulty;
   result: "win" | "lose" | "draw" | null = null;
   onHud: (s: HudSnap) => void = () => {};
   onPause: (p: boolean) => void = () => {};
   onEnd: (r: "win" | "lose" | "draw") => void = () => {};
-  private lastLock = true;
+  onKill: (headshot: boolean) => void = () => {};
+  private robot = new THREE.Group();
+  private robotProg = 0.5;
+  private pushLen = 0;
+  private pushCum: number[] = [];
   private botNav = new Map<string, { x: number; z: number; stuck: number; side: number; avoid: number }>();
 
   constructor(canvas: HTMLCanvasElement, hero: HeroId, mapId: MapId, difficultyId: DifficultyId) {
@@ -108,15 +124,24 @@ export class Match {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
-    this.renderer.setClearColor(0x0b1018, 1);
-    this.scene.fog = new THREE.Fog(0x0b1018, this.map.fogNear, this.map.fogFar);
-    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 140);
+    this.renderer.setClearColor(this.map.skyLow, 1);
+    this.scene.fog = new THREE.Fog(this.map.skyLow, this.map.fogNear, this.map.fogFar);
+    // far must clear the sky dome from anywhere in the arena, or the dome gets
+    // clipped and the clear colour shows through as a hole.
+    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 260);
+    this.camera.rotation.order = "YXZ";
+    this.viewCamera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.02, 6);
+    this.renderer.autoClear = false;
     this.input = new Input(canvas);
 
-    this.scene.add(new THREE.AmbientLight(0x5a6a80, 0.6));
-    const sun = new THREE.DirectionalLight(0xffe4b5, 1.05);
+    this.scene.add(new THREE.HemisphereLight(this.map.skyTop, this.map.floor, 1.5));
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const sun = new THREE.DirectionalLight(0xfff0d0, 1.6);
     sun.position.set(-14, 28, 12);
     this.scene.add(sun);
+    const rim = new THREE.DirectionalLight(0x9fb6dd, 0.5);
+    rim.position.set(16, 10, -18);
+    this.scene.add(rim);
 
     const built = buildArena(this.scene, this.map);
     this.colliders = built.colliders;
@@ -142,6 +167,8 @@ export class Match {
     this.onResize = () => {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
+      this.viewCamera.aspect = innerWidth / innerHeight;
+      this.viewCamera.updateProjectionMatrix();
       this.renderer.setSize(innerWidth, innerHeight);
     };
     window.addEventListener("resize", this.onResize);
@@ -152,12 +179,37 @@ export class Match {
     this.ray.layers.enable(0);
     this.ray.layers.enable(2);
     this.player.outline.visible = false;
+    this.hideOwnBody();
+    this.buildViewGun(hero);
+    this.buildViewField();
+    this.buildViewGrapple();
+
+    if (this.map.kind === "push") {
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.7, 0.9, 1.6, 10),
+        new THREE.MeshStandardMaterial({ color: 0xc8d0c0, metalness: 0.45, roughness: 0.4 }),
+      );
+      body.position.y = 0.9;
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(1.1, 0.08, 8, 20),
+        new THREE.MeshBasicMaterial({ color: 0xf5c518 }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.15;
+      this.robot.add(body, ring);
+      this.scene.add(this.robot);
+      this.initPushPath();
+      const start = this.pointOnPush(this.robotProg);
+      this.robot.position.set(start.x, 0, start.z);
+    }
   }
 
   start() {
+    if (!this.live) return;
     this.clock.start();
     this.input.requestLock();
     const loop = () => {
+      if (!this.live) return;
       this.raf = requestAnimationFrame(loop);
       this.frame();
     };
@@ -173,56 +225,55 @@ export class Match {
   }
 
   dispose() {
+    this.live = false;
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.onResize);
+    this.clearGrappleLine();
     this.input.dispose();
     this.renderer.dispose();
   }
 
   private frame() {
     const dt = Math.min(this.clock.getDelta(), 0.05);
-    if (!this.paused && this.lastLock && !this.input.locked && !this.ended) {
-      this.setPaused(true);
-    }
-    this.lastLock = this.input.locked;
 
-    if (!this.paused && !this.ended) {
+    if (!this.ended) {
       this.timeLeft -= dt;
       this.tickPlayer(dt);
       this.tickBots(dt);
       this.tickWorld(dt);
-      this.tickCapture(dt);
+      if (this.map.kind === "push") this.tickPush(dt);
+      else this.tickCapture(dt);
       if (this.timeLeft <= 0) this.finishByTime();
     }
 
     this.updateCamera(dt);
+    this.tickHpReveal(dt);
+    this.updateViewHands(dt);
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    if (this.viewGun.visible || this.viewField.visible || this.viewGrapple.visible) {
+      this.renderer.clearDepth();
+      this.renderer.render(this.viewScene, this.viewCamera);
+    }
     this.pushHud();
     this.input.endFrame();
   }
 
   private tickPlayer(dt: number) {
     const p = this.player;
-    if (this.input.keys.has("Escape")) {
-      this.input.keys.delete("Escape");
-      this.setPaused(true);
-      return;
-    }
-    if (this.input.f3Down) {
-      this.firstPerson = !this.firstPerson;
-      this.applyViewLayer();
-    }
     if (!p.alive) {
+      this.viewAct = "idle";
+      this.viewActT = 0;
+      this.fieldArmed = false;
       p.respawn -= dt;
       if (p.respawn <= 0) p.place();
       return;
     }
     p.yaw -= this.input.mouseDX * 0.0022;
     p.pitch -= this.input.mouseDY * 0.0022;
-    p.pitch = THREE.MathUtils.clamp(p.pitch, -1.15, 1.15);
+    p.pitch = THREE.MathUtils.clamp(p.pitch, -1.45, 1.45);
 
     this.controlHero(p, dt, true);
-    if (this.input.keys.has("KeyV") && p.meleeCd <= 0) this.melee(p);
   }
 
   private controlHero(f: Fighter, dt: number, isPlayer: boolean) {
@@ -311,6 +362,7 @@ export class Match {
   }
 
   private tickSoldier(f: Fighter, _dt: number, isPlayer: boolean) {
+    if (isPlayer && this.viewAct !== "idle") return;
     if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) {
       f.reload = 1.5;
     }
@@ -329,6 +381,7 @@ export class Match {
   }
 
   private tickWidow(f: Fighter, dt: number, isPlayer: boolean) {
+    if (isPlayer && this.viewAct !== "idle") return;
     if (isPlayer) f.scoped = this.input.rmb;
     if (f.scoped) f.charge = Math.min(1, f.charge + dt / 0.85);
     else f.charge = 0;
@@ -346,22 +399,6 @@ export class Match {
     if (isPlayer) {
       if (f.scoped && this.input.lmbDown) this.fireWidow(f);
       else if (!f.scoped && this.input.lmb) this.fireWidow(f);
-    }
-  }
-
-  private melee(f: Fighter) {
-    if (f.meleeCd > 0 || !f.alive) return;
-    f.meleeCd = 1;
-    f.eye(this.tmp);
-    f.lookDir(this.tmp2);
-    for (const o of this.fighters) {
-      if (!o.alive || o.team === f.team) continue;
-      const d = o.group.position.distanceTo(f.group.position);
-      if (d > 2.35) continue;
-      o.eye(this.look);
-      const to = this.look.sub(this.tmp).normalize();
-      if (to.dot(this.tmp2) < 0.15) continue;
-      this.hurt(o, 30, f, true);
     }
   }
 
@@ -414,7 +451,7 @@ export class Match {
     }
     const part = first.object.userData.part as string;
     const dealt = part === "head" ? damage * headMul : damage;
-    this.hurt(target, dealt, f, true);
+    this.hurt(target, dealt, f, true, part === "head");
   }
 
   private aimRay(f: Fighter, spread: number) {
@@ -451,10 +488,26 @@ export class Match {
 
   private dropField(f: Fighter) {
     f.fieldCd = 15;
+    if (f === this.player) {
+      this.viewAct = "field";
+      this.viewActT = 0;
+      this.fieldArmed = true;
+      return;
+    }
+    this.spawnField(f);
+  }
+
+  private spawnField(f: Fighter) {
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(4, 4, 0.08, 28, 1, true),
       new THREE.MeshBasicMaterial({ color: 0x7bed9f, transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
     );
+    const pack = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.18, 0.22, 10),
+      new THREE.MeshStandardMaterial({ color: 0x6ee7a8, emissive: 0x2ecc71, emissiveIntensity: 0.45 }),
+    );
+    pack.position.y = 0.16;
+    mesh.add(pack);
     const pos = f.group.position.clone();
     pos.y += 0.05;
     mesh.position.copy(pos);
@@ -471,6 +524,10 @@ export class Match {
     f.grappleT = 0.38;
     f.grappleTo = hit.point.clone();
     f.grappleTo.y = Math.max(0, hit.point.y);
+    if (f === this.player) {
+      this.viewAct = "grapple";
+      this.viewActT = 0;
+    }
   }
 
   private placeMine(f: Fighter) {
@@ -555,8 +612,6 @@ export class Match {
 
     for (const f of this.fighters) {
       f.outline.visible = f !== this.player && f.alive;
-      const mat = f.outline.material as THREE.MeshBasicMaterial;
-      mat.opacity = this.player.infraT > 0 && f.team === "enemy" ? 1 : 0.82;
     }
   }
 
@@ -590,30 +645,351 @@ export class Match {
     return list;
   }
 
-  private hurt(target: Fighter, amount: number, src: Fighter, credit: boolean) {
+  private hurt(target: Fighter, amount: number, src: Fighter, credit: boolean, headshot = false) {
     if (!target.alive || amount <= 0) return;
     target.health -= amount;
-    if (credit && src.team !== target.team) src.ult = Math.min(100, src.ult + amount * 0.12);
+    if (credit && src.team !== target.team) {
+      src.ult = Math.min(100, src.ult + amount * 0.12);
+      target.hits.push({ id: src.id, team: src.team, t: performance.now() });
+    }
+    if (src === this.player && target.team === "enemy") this.hpReveal.set(target.id, 5);
     if (target.health <= 0) {
       target.health = 0;
       target.alive = false;
       target.group.visible = false;
       target.respawn = 5;
       target.scoped = false;
+      target.deaths += 1;
       if (credit) {
+        src.kills += 1;
         src.ult = Math.min(100, src.ult + 20);
+        const now = performance.now();
+        const helped = new Set<string>();
+        for (const h of target.hits) {
+          if (now - h.t > 4000 || h.team !== src.team || h.id === src.id) continue;
+          helped.add(h.id);
+        }
+        for (const id of helped) {
+          const pal = this.fighters.find((x) => x.id === id);
+          if (pal) pal.assists += 1;
+        }
         this.feed.push({
           t: 4,
           text: `${heroById(src.heroId).name}  →  ${heroById(target.heroId).name}`,
         });
+        if (src === this.player) this.onKill(headshot);
       }
+      target.hits = [];
     }
   }
 
-  private applyViewLayer() {
-    this.player.group.traverse((o) => {
-      o.layers.set(this.firstPerson ? 2 : 0);
+  // The weapon gets its own scene and a narrower lens. Sharing the 80-degree
+  // world camera stretches anything this close into a wall of geometry, and a
+  // separate depth-cleared pass also stops the gun poking through cover.
+  private buildViewGun(hero: HeroId) {
+    this.viewCamera.position.set(0, 0, 0);
+    this.viewScene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const key = new THREE.DirectionalLight(0xfff2d8, 1.25);
+    key.position.set(-0.6, 1, 0.8);
+    this.viewScene.add(key);
+    this.shapeViewGun(hero);
+    // Angled across the lower right so the barrel reads as a length rather than
+    // a block pointed straight at the lens.
+    this.viewGun.scale.setScalar(0.62);
+    this.viewGun.position.set(0.27, -0.25, -0.7);
+    this.viewGun.rotation.set(0.05, 0.2, 0.04);
+    this.viewScene.add(this.viewGun);
+  }
+
+  private shapeViewGun(hero: HeroId) {
+    const metal = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.45, metalness: 0.5, fog: false });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x1f242e, roughness: 0.6, fog: false });
+    const glove = new THREE.MeshStandardMaterial({
+      color: hero === "widowmaker" ? 0x6a3a58 : 0xb08968,
+      roughness: 0.78,
+      fog: false,
     });
+    const trim = new THREE.MeshStandardMaterial({
+      color: hero === "widowmaker" ? 0x9c4a92 : 0xd8ae34,
+      emissive: hero === "widowmaker" ? 0x5a2050 : 0x6a5410,
+      emissiveIntensity: 0.6,
+      fog: false,
+    });
+
+    const box = (w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z);
+      this.viewGun.add(m);
+      return m;
+    };
+
+    const receiver = hero === "widowmaker" ? 0.42 : 0.4;
+    box(0.09, 0.13, receiver, dark, 0, 0, 0.06);
+    box(0.075, 0.1, 0.16, dark, 0, -0.02, 0.32);
+
+    if (hero === "widowmaker") {
+      box(0.045, 0.045, 0.78, metal, 0, 0.01, -0.62);
+      box(0.05, 0.05, 0.28, trim, 0, 0.12, -0.04);
+      box(0.02, 0.06, 0.02, metal, 0, 0.09, 0.06);
+      box(0.02, 0.06, 0.02, metal, 0, 0.09, -0.14);
+      box(0.06, 0.05, 0.12, dark, 0, -0.02, -1.03);
+    } else {
+      box(0.06, 0.06, 0.42, metal, 0, 0.012, -0.42);
+      box(0.08, 0.08, 0.08, dark, 0, 0.012, -0.66);
+      box(0.075, 0.03, 0.34, trim, 0, 0.08, -0.02);
+      box(0.062, 0.2, 0.12, dark, 0, -0.15, 0.02);
+    }
+
+    box(0.06, 0.15, 0.08, dark, 0, -0.13, 0.22).rotation.x = -0.22;
+
+    const grip = this.makeHand(glove, 1);
+    grip.position.set(-0.02, -0.16, 0.2);
+    grip.rotation.set(0.62, 0.22, 0.2);
+    this.viewGun.add(grip);
+
+    const support = this.makeHand(glove, -1);
+    support.position.set(-0.02, -0.075, -0.36);
+    support.rotation.set(0.28, 0.1, -0.16);
+    this.viewGun.add(support);
+
+    this.viewGun.traverse((o) => {
+      o.frustumCulled = false;
+    });
+  }
+
+  private makeHand(glove: THREE.Material, side: 1 | -1) {
+    const g = new THREE.Group();
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.088, 0.1, 0.12), glove);
+    palm.position.set(side * 0.012, 0, 0);
+    const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.078, 0.078, 0.14), glove);
+    wrist.position.set(side * 0.012, -0.03, 0.11);
+    wrist.rotation.x = 0.25;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.32), glove);
+    arm.position.set(side * 0.02, -0.08, 0.28);
+    arm.rotation.x = 0.35;
+    g.add(palm, wrist, arm);
+    for (let i = 0; i < 4; i++) {
+      const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.024, 0.05), glove);
+      knuckle.position.set(side * 0.014, 0.036 - i * 0.026, -0.078);
+      knuckle.rotation.x = 1.05;
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.022, 0.04), glove);
+      tip.position.set(side * 0.014, 0.008 - i * 0.026, -0.112);
+      tip.rotation.x = 1.4;
+      g.add(knuckle, tip);
+    }
+    const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.026, 0.058), glove);
+    thumb.position.set(side * -0.048, 0.02, -0.018);
+    thumb.rotation.set(0.4, side * 0.75, side * 0.28);
+    g.add(thumb);
+    return g;
+  }
+
+  private buildViewField() {
+    const green = new THREE.MeshStandardMaterial({
+      color: 0x7bed9f,
+      emissive: 0x2ecc71,
+      emissiveIntensity: 0.55,
+      fog: false,
+    });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x1f2a22, roughness: 0.55, fog: false });
+    const glove = new THREE.MeshStandardMaterial({ color: 0xb08968, roughness: 0.78, fog: false });
+    const can = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.16, 10), green);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.062, 0.02, 10), dark);
+    lid.position.y = 0.09;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.012, 8, 14), dark);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = -0.06;
+    const left = this.makeHand(glove, -1);
+    left.position.set(-0.07, -0.02, 0.02);
+    left.rotation.set(0.2, 0.4, 0.3);
+    const right = this.makeHand(glove, 1);
+    right.position.set(0.07, -0.02, 0.04);
+    right.rotation.set(0.25, -0.35, -0.25);
+    this.viewField.add(can, lid, ring, left, right);
+    this.viewField.scale.setScalar(0.42);
+    this.viewField.visible = false;
+    this.viewField.traverse((o) => {
+      o.frustumCulled = false;
+    });
+    this.viewScene.add(this.viewField);
+  }
+
+  private buildViewGrapple() {
+    const glove = new THREE.MeshStandardMaterial({ color: 0x3a2038, roughness: 0.75, fog: false });
+    const trim = new THREE.MeshStandardMaterial({
+      color: 0x9c4a92,
+      emissive: 0x5a2050,
+      emissiveIntensity: 0.55,
+      fog: false,
+    });
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.34), glove);
+    arm.position.set(0, 0, 0.22);
+    const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.06, 0.08), glove);
+    wrist.position.set(0, 0.01, 0.02);
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.1), glove);
+    palm.position.set(0, 0.02, -0.06);
+    const web = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.008, 0.07, 6), trim);
+    web.rotation.x = Math.PI / 2;
+    web.position.set(0, 0.01, -0.12);
+    const hook = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.06, 6), trim);
+    hook.rotation.x = -Math.PI / 2;
+    hook.position.set(0, 0.01, -0.17);
+    const hand = this.makeHand(glove, -1);
+    hand.position.set(-0.01, -0.01, -0.02);
+    hand.rotation.set(1.1, 0.15, -0.35);
+    this.viewGrapple.add(arm, wrist, palm, web, hook, hand);
+    this.viewGrapple.scale.setScalar(0.62);
+    this.viewGrapple.visible = false;
+    this.viewGrapple.traverse((o) => {
+      o.frustumCulled = false;
+    });
+    this.viewScene.add(this.viewGrapple);
+  }
+
+  private restGun() {
+    this.viewGun.scale.setScalar(0.62);
+    this.viewGun.position.set(0.27, -0.25, -0.7);
+    this.viewGun.rotation.set(0.05, 0.2, 0.04);
+  }
+
+  private updateViewHands(dt: number) {
+    const p = this.player;
+    const scoped = p.alive && p.heroId === "widowmaker" && p.scoped;
+    if (!p.alive || (scoped && this.viewAct !== "grapple")) {
+      this.viewGun.visible = false;
+      this.viewField.visible = false;
+      this.viewGrapple.visible = false;
+      if (!p.alive) this.clearGrappleLine();
+      return;
+    }
+
+    if (this.viewAct === "field") {
+      this.viewActT += dt;
+      this.poseField();
+      if (this.viewActT >= 0.82) {
+        this.viewAct = "idle";
+        this.viewActT = 0;
+      }
+    } else if (this.viewAct === "grapple") {
+      this.viewActT += dt;
+      this.poseGrapple();
+      if (this.viewActT >= 0.52) {
+        this.viewAct = "idle";
+        this.viewActT = 0;
+      }
+    } else {
+      this.viewGun.visible = true;
+      this.viewField.visible = false;
+      this.viewGrapple.visible = false;
+      this.restGun();
+    }
+
+    this.updateGrappleLine();
+  }
+
+  private poseField() {
+    const t = this.viewActT;
+    const gunOut = t < 0.16 || t > 0.64;
+    this.viewGun.visible = gunOut;
+    this.viewField.visible = t >= 0.08 && t <= 0.64;
+    this.viewGrapple.visible = false;
+    if (t < 0.16) {
+      const k = t / 0.16;
+      this.viewGun.position.set(0.27, -0.25 - k * 0.45, -0.7);
+      this.viewGun.rotation.set(0.05 + k * 0.7, 0.2, 0.04);
+    } else {
+      this.restGun();
+    }
+    if (this.viewField.visible) {
+      const u = THREE.MathUtils.clamp((t - 0.1) / 0.46, 0, 1);
+      this.viewField.position.set(0.1, -0.1 - u * 0.42, -0.42);
+      this.viewField.rotation.set(0.2 + u * 0.95, 0.08, 0);
+    }
+    if (t >= 0.44 && this.fieldArmed) {
+      this.fieldArmed = false;
+      this.spawnField(this.player);
+    }
+  }
+
+  private poseGrapple() {
+    const t = this.viewActT;
+    this.viewGrapple.visible = true;
+    this.viewField.visible = false;
+    this.viewGun.visible = t < 0.06 || t > 0.42;
+    if (this.viewGun.visible) this.restGun();
+    const punch = t < 0.1 ? t / 0.1 : Math.max(0, 1 - (t - 0.1) / 0.28);
+    this.viewGrapple.position.set(-0.3 + punch * 0.14, -0.24 + punch * 0.22, -0.22 - punch * 0.5);
+    this.viewGrapple.rotation.set(-1.05 * punch, 0.45, -0.55);
+  }
+
+  private updateGrappleLine() {
+    const p = this.player;
+    if (!p.grappleTo || p.grappleT <= 0) {
+      this.clearGrappleLine();
+      return;
+    }
+    p.eye(this.tmp);
+    this.tmp.addScaledVector(this.camera.getWorldDirection(this.tmp2), 0.28);
+    this.tmp.x -= Math.cos(p.yaw) * 0.22;
+    this.tmp.y -= 0.14;
+    this.tmp.z += Math.sin(p.yaw) * 0.22;
+    if (!this.grappleLine) {
+      const g = new THREE.BufferGeometry().setFromPoints([this.tmp, p.grappleTo]);
+      this.grappleLine = new THREE.Line(
+        g,
+        new THREE.LineBasicMaterial({ color: 0xc77db8, transparent: true, opacity: 0.85 }),
+      );
+      this.scene.add(this.grappleLine);
+    } else {
+      const pos = this.grappleLine.geometry.getAttribute("position") as THREE.BufferAttribute;
+      pos.setXYZ(0, this.tmp.x, this.tmp.y, this.tmp.z);
+      pos.setXYZ(1, p.grappleTo.x, p.grappleTo.y, p.grappleTo.z);
+      pos.needsUpdate = true;
+    }
+  }
+
+  private clearGrappleLine() {
+    if (!this.grappleLine) return;
+    this.scene.remove(this.grappleLine);
+    this.grappleLine.geometry.dispose();
+    this.grappleLine = null;
+  }
+
+  private tickHpReveal(dt: number) {
+    for (const [id, left] of this.hpReveal) {
+      const next = left - dt;
+      if (next <= 0) this.hpReveal.delete(id);
+      else this.hpReveal.set(id, next);
+    }
+  }
+
+  private collectHpBars() {
+    const bars: HudSnap["hpBars"] = [];
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      if (f === this.player) continue;
+      const enemy = f.team === "enemy";
+      if (enemy && (this.hpReveal.get(f.id) ?? 0) <= 0) continue;
+      this.tmp.set(f.group.position.x, f.group.position.y + f.height + 0.32, f.group.position.z);
+      this.tmp.project(this.camera);
+      if (this.tmp.z < -1 || this.tmp.z > 1 || this.tmp.x < -1.15 || this.tmp.x > 1.15) continue;
+      bars.push({
+        id: f.id,
+        x: (this.tmp.x * 0.5 + 0.5) * innerWidth,
+        y: (-this.tmp.y * 0.5 + 0.5) * innerHeight,
+        health: Math.max(0, f.health),
+        maxHealth: f.maxHealth,
+        ally: f.team === "ally",
+      });
+    }
+    return bars;
+  }
+
+  // Your own body lives on layer 2, which the camera never renders but rays
+  // still test, so you stay a valid target without blocking your own view.
+  private hideOwnBody() {
+    this.player.group.traverse((o) => o.layers.set(2));
+    this.camera.layers.set(0);
     this.ray.layers.enable(0);
     this.ray.layers.enable(2);
   }
@@ -646,10 +1022,6 @@ export class Match {
       if (think) this.steerBot(f);
       this.controlHero(f, dt, false);
       const foe = this.nearestFoe(f);
-      if (foe && f.meleeCd <= 0 && f.group.position.distanceTo(foe.group.position) < 2.15) {
-        this.lookAt(f, foe);
-        this.melee(f);
-      }
       if (f.heroId === "soldier76") {
         if (
           foe &&
@@ -712,6 +1084,15 @@ export class Match {
 
   private steerBot(f: Fighter) {
     const foe = this.nearestFoe(f);
+    if (this.map.kind === "push") {
+      const rx = this.robot.position.x;
+      const rz = this.robot.position.z;
+      this.setBotMove(f, rx, rz, 1.55);
+      f.sprinting = true;
+      if (foe && this.canSee(f, foe)) this.lookAt(f, foe);
+      else this.faceToward(f, this.tmp.set(rx, 0, rz));
+      return;
+    }
     const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
     const slot = this.pointSlot(f).clone();
 
@@ -828,6 +1209,51 @@ export class Match {
     f.pitch = 0;
   }
 
+  private initPushPath() {
+    this.pushCum = [0];
+    this.pushLen = 0;
+    for (let i = 1; i < PUSH_PATH.length; i++) {
+      const a = PUSH_PATH[i - 1];
+      const b = PUSH_PATH[i];
+      this.pushLen += Math.hypot(b.x - a.x, b.z - a.z);
+      this.pushCum.push(this.pushLen);
+    }
+  }
+
+  private pointOnPush(prog: number) {
+    const dist = THREE.MathUtils.clamp(prog, 0, 1) * this.pushLen;
+    let i = 1;
+    while (i < this.pushCum.length && this.pushCum[i] < dist) i += 1;
+    const a = PUSH_PATH[i - 1];
+    const b = PUSH_PATH[Math.min(i, PUSH_PATH.length - 1)];
+    const d0 = this.pushCum[i - 1];
+    const d1 = this.pushCum[Math.min(i, this.pushCum.length - 1)];
+    const t = (dist - d0) / Math.max(0.001, d1 - d0);
+    return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
+  }
+
+  private tickPush(dt: number) {
+    let ally = 0;
+    let enemy = 0;
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      const dx = f.group.position.x - this.robot.position.x;
+      const dz = f.group.position.z - this.robot.position.z;
+      if (dx * dx + dz * dz > PUSH_RADIUS * PUSH_RADIUS) continue;
+      if (f.team === "ally") ally += 1;
+      else enemy += 1;
+    }
+    if (ally > 0 && enemy === 0) this.robotProg += (dt * 0.48 * Math.min(ally, 3)) / Math.max(1, this.pushLen);
+    else if (enemy > 0 && ally === 0) this.robotProg -= (dt * 0.48 * Math.min(enemy, 3)) / Math.max(1, this.pushLen);
+    this.robotProg = THREE.MathUtils.clamp(this.robotProg, 0, 1);
+    const at = this.pointOnPush(this.robotProg);
+    this.robot.position.set(at.x, 0, at.z);
+    this.allyCap = this.robotProg * 100;
+    this.enemyCap = (1 - this.robotProg) * 100;
+    if (this.robotProg >= 0.995) this.endMatch("win");
+    else if (this.robotProg <= 0.005) this.endMatch("lose");
+  }
+
   private tickCapture(dt: number) {
     let ally = 0;
     let enemy = 0;
@@ -839,8 +1265,8 @@ export class Match {
     }
     const contested = ally > 0 && enemy > 0;
     if (!contested) {
-      if (ally > 0) this.allyCap = Math.min(CAPTURE_GOAL, this.allyCap + dt * 3.4 * Math.min(ally, 3));
-      if (enemy > 0) this.enemyCap = Math.min(CAPTURE_GOAL, this.enemyCap + dt * 3.4 * Math.min(enemy, 3));
+      if (ally > 0) this.allyCap = Math.min(CAPTURE_GOAL, this.allyCap + dt * 1.04 * Math.min(ally, 3));
+      if (enemy > 0) this.enemyCap = Math.min(CAPTURE_GOAL, this.enemyCap + dt * 1.04 * Math.min(enemy, 3));
     }
     if (this.allyCap >= CAPTURE_GOAL) this.endMatch("win");
     else if (this.enemyCap >= CAPTURE_GOAL) this.endMatch("lose");
@@ -863,30 +1289,16 @@ export class Match {
   private updateCamera(dt: number) {
     const p = this.player;
     const scoped = p.alive && p.heroId === "widowmaker" && p.scoped;
-    const fov = scoped ? 28 : this.firstPerson ? 75 : p.visorT > 0 ? 58 : 62;
-    this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 8);
+    const fov = scoped ? 28 : 80;
+    this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 10);
     this.camera.updateProjectionMatrix();
-    p.lookDir(this.look);
-    if (this.firstPerson) {
-      p.eye(this.camGoal);
-      this.camera.position.copy(this.camGoal);
-      this.tmp2.copy(this.camGoal).addScaledVector(this.look, 10);
-      this.camera.lookAt(this.tmp2);
-      return;
-    }
-    const dist = scoped ? 2.4 : this.camDist;
-    const offX = scoped ? 0.18 : 0.85;
-    const cy = Math.cos(p.pitch);
-    const behind = this.tmp.set(
-      Math.sin(p.yaw) * dist * cy + Math.cos(p.yaw) * offX,
-      this.player.height * 0.72 - Math.sin(p.pitch) * dist * 0.65 + 0.35,
-      Math.cos(p.yaw) * dist * cy - Math.sin(p.yaw) * offX,
-    );
-    this.camGoal.copy(p.group.position).add(behind);
-    if (this.camGoal.y < 0.4) this.camGoal.y = 0.4;
-    this.camera.position.lerp(this.camGoal, 1 - Math.pow(0.0002, dt));
-    this.tmp2.copy(p.group.position).add(this.tmp.set(0, p.height * 0.78, 0)).addScaledVector(this.look, 8);
-    this.camera.lookAt(this.tmp2);
+
+    // Euler YXZ with rotation.x = +pitch reproduces Fighter.lookDir exactly,
+    // so screen center and the hitscan ray always agree.
+    this.camera.rotation.set(p.pitch, p.yaw, 0);
+    p.eye(this.tmp);
+    this.camera.position.copy(this.tmp);
+
   }
 
   private pushHud() {
@@ -898,7 +1310,11 @@ export class Match {
     let enemy = 0;
     for (const f of this.fighters) {
       if (!f.alive) continue;
-      if (!onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) continue;
+      if (this.map.kind === "push") {
+        const dx = f.group.position.x - this.robot.position.x;
+        const dz = f.group.position.z - this.robot.position.z;
+        if (dx * dx + dz * dz > PUSH_RADIUS * PUSH_RADIUS) continue;
+      } else if (!onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) continue;
       if (f.team === "ally") ally += 1;
       else enemy += 1;
     }
@@ -926,33 +1342,42 @@ export class Match {
       infra: p.infraT > 0,
       scoped: p.scoped,
       charge: p.charge,
-      melee: p.meleeCd,
       sprint: p.sprinting,
       hero: p.heroId,
       obj:
-        ally && enemy
-          ? "경합"
-          : ally
-            ? "점령 중"
-            : enemy
-              ? "적 점령"
-              : "거점으로",
+        this.map.kind === "push"
+          ? ally && enemy
+            ? "로봇 경합"
+            : ally
+              ? "미는 중"
+              : enemy
+                ? "적이 미는 중"
+                : "로봇으로"
+          : ally && enemy
+            ? "경합"
+            : ally
+              ? "점령 중"
+              : enemy
+                ? "적 점령"
+                : "거점으로",
       allyCap: this.allyCap,
       enemyCap: this.enemyCap,
       time: Math.max(0, this.timeLeft),
       contested: ally > 0 && enemy > 0,
       hint: p.alive
         ? this.input.locked
-          ? this.firstPerson
-            ? "F3 3인칭"
-            : "F3 1인칭"
-          : "클릭해서 조준 잠금 · F3 시점"
+          ? ""
+          : "클릭해서 조준 잠금"
         : `${p.respawn.toFixed(1)}초 후 리스폰`,
       crosshairHot: hot,
       feed: this.feed.map((x) => x.text),
-      firstPerson: this.firstPerson,
+      hpBars: this.collectHpBars(),
       aliveAlly,
       aliveEnemy,
+      mode: this.map.kind,
+      k: p.kills,
+      d: p.deaths,
+      a: p.assists,
     });
   }
 }

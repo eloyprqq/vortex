@@ -3,3 +3,7 @@ dist
 .DS_Store
 *.local
 .vscode
+*.mp4
+*.mkv
+*.webm
+*.mov

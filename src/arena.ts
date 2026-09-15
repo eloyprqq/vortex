@@ -12,8 +12,23 @@ export type Aabb = {
   maxz: number;
 };
 
-export const MATCH_SECONDS = 180;
-export const CAPTURE_GOAL = 100;
+export const MATCH_SECONDS = 140;
+export const CAPTURE_GOAL = 80;
+export const PUSH_END = 30;
+export const PUSH_RADIUS = 7.2;
+// Winds around the harbor blocks so the robot is pushed along a route, not a
+// straight lane. Progress 0 is the ally-side end, 1 is the enemy-side end.
+export const PUSH_PATH: { x: number; z: number }[] = [
+  { x: 0, z: 26 },
+  { x: 11, z: 16 },
+  { x: 11, z: 6 },
+  { x: 4, z: 10 },
+  { x: 12, z: 2 },
+  { x: 10, z: -8 },
+  { x: -4, z: -6 },
+  { x: -12, z: -16 },
+  { x: 0, z: -26 },
+];
 
 export function aabbFromProp(p: Prop): Aabb {
   return {
@@ -26,12 +41,48 @@ export function aabbFromProp(p: Prop): Aabb {
   };
 }
 
+// Gradient dome so the upper half of the screen is a sky instead of void.
+// Kept out of the returned mesh list: it must not block camera or bullet rays.
+function addSky(scene: THREE.Scene, map: MapDef) {
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(150, 24, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        top: { value: new THREE.Color(map.skyTop) },
+        low: { value: new THREE.Color(map.skyLow) },
+      },
+      vertexShader: `
+        varying float vH;
+        void main() {
+          vH = normalize(position).y;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 top;
+        uniform vec3 low;
+        varying float vH;
+        void main() {
+          gl_FragColor = vec4(mix(low, top, clamp(vH * 1.6 + 0.1, 0.0, 1.0)), 1.0);
+        }
+      `,
+    }),
+  );
+  dome.renderOrder = -1;
+  scene.add(dome);
+}
+
 export function buildArena(
   scene: THREE.Scene,
   map: MapDef,
 ): { colliders: Aabb[]; meshes: THREE.Object3D[] } {
   const colliders = map.props.map(aabbFromProp);
   const meshes: THREE.Object3D[] = [];
+
+  addSky(scene, map);
 
   const floor = new THREE.Mesh(
     new THREE.CircleGeometry(map.floorR, 72),
@@ -75,6 +126,27 @@ export function buildArena(
     mesh.position.set(p.x, p.y, p.z);
     scene.add(mesh);
     meshes.push(mesh);
+  }
+
+  if (map.kind === "push") {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x3a4a2a,
+      roughness: 0.9,
+      emissive: 0x1a2208,
+      emissiveIntensity: 0.2,
+    });
+    for (let i = 0; i < PUSH_PATH.length - 1; i++) {
+      const a = PUSH_PATH[i];
+      const b = PUSH_PATH[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz);
+      const path = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.06, len + 0.4), mat);
+      path.position.set((a.x + b.x) * 0.5, 0.03, (a.z + b.z) * 0.5);
+      path.rotation.y = Math.atan2(dx, dz);
+      scene.add(path);
+      meshes.push(path);
+    }
   }
 
   return { colliders, meshes };

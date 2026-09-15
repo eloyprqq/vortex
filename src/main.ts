@@ -11,7 +11,10 @@ const canvasEl = document.querySelector<HTMLCanvasElement>("#backdrop");
 if (!canvasEl) throw new Error("backdrop canvas missing");
 const canvas = canvasEl;
 
-let stopLobby = createLobbyBackdrop(canvas);
+// The lobby backdrop owns its own renderer and frame loop on the shared canvas.
+// Exactly one of it or the match may be live, or both draw over each other every
+// frame and the view appears to spin.
+let stopLobby: (() => void) | null = createLobbyBackdrop(canvas);
 let match: Match | null = null;
 let selected: HeroId = "soldier76";
 let selectedMap: MapId = "horizon";
@@ -22,6 +25,7 @@ let votePhase: "idle" | "voting" | "spin" | "done" = "idle";
 let voteLeft = 8;
 let voteTick: number | null = null;
 let voteBots: number[] = [];
+let killMarkTimer = 0;
 
 const screens: Record<Screen, HTMLElement> = {
   home: must("#screen-home"),
@@ -106,6 +110,26 @@ function beep(freq: number, ms: number) {
   }, ms);
 }
 
+function tickets(): MapId[] {
+  const list: MapId[] = [];
+  for (const map of MAPS) {
+    for (let i = 0; i < votes[map.id]; i++) list.push(map.id);
+  }
+  return list;
+}
+
+function renderTickets(hi: number | null = null, win = -1) {
+  const rail = must("#ticket-rail");
+  rail.replaceChildren();
+  tickets().forEach((id, i) => {
+    const el = document.createElement("span");
+    el.className = `ticket ${id}`;
+    if (hi === i) el.classList.add("on");
+    if (win === i) el.classList.add("win");
+    rail.append(el);
+  });
+}
+
 function startVote() {
   stopVoteTimers();
   playerVote = null;
@@ -116,6 +140,7 @@ function startVote() {
   voteLeft = 8;
   must<HTMLButtonElement>("#btn-after-vote").disabled = true;
   renderMaps();
+  renderTickets();
   voteTick = window.setInterval(() => {
     if (votePhase !== "voting") return;
     voteLeft -= 0.1;
@@ -128,6 +153,7 @@ function startVote() {
       const pick = MAPS[Math.floor(Math.random() * MAPS.length)].id;
       votes[pick] += 1;
       renderMaps();
+      renderTickets();
       beep(420, 40);
     }, 400 + Math.random() * 6500);
     voteBots.push(t);
@@ -137,37 +163,41 @@ function startVote() {
 function startSpin() {
   votePhase = "spin";
   stopVoteTimers();
-  must("#vote-timer").textContent = "추첨";
-  const ids = MAPS.map((m) => m.id);
-  const pool: MapId[] = [];
-  for (const id of ids) {
-    const n = Math.max(1, votes[id]);
-    for (let i = 0; i < n; i++) pool.push(id);
+  const pool = tickets();
+  if (pool.length === 0) {
+    selectedMap = MAPS[Math.floor(Math.random() * MAPS.length)].id;
+    votePhase = "done";
+    renderMaps();
+    renderTickets();
+    must("#vote-timer").textContent = mapById(selectedMap).name;
+    must<HTMLButtonElement>("#btn-after-vote").disabled = false;
+    return;
   }
-  const winner = pool[Math.floor(Math.random() * pool.length)];
+  const winAt = Math.floor(Math.random() * pool.length);
+  selectedMap = pool[winAt];
+  must("#vote-timer").textContent = "표 추첨";
   let i = 0;
-  const hops = 18 + Math.floor(Math.random() * 8);
+  const hops = pool.length * 3 + winAt;
   const tick = () => {
-    const current = ids[i % ids.length];
-    selectedMap = current;
-    renderMaps(current);
-    beep(680 + (i % 3) * 80, 35);
+    const idx = i % pool.length;
+    renderTickets(idx);
+    beep(620 + (idx % 4) * 40, 28);
     i += 1;
-    if (i >= hops) {
-      selectedMap = winner;
+    if (i > hops) {
       votePhase = "done";
-      renderMaps(winner);
-      must("#vote-timer").textContent = `${mapById(winner).name}`;
+      renderMaps();
+      renderTickets(null, winAt);
+      must("#vote-timer").textContent = `${mapById(selectedMap).name} · ${mapById(selectedMap).mode}`;
       must<HTMLButtonElement>("#btn-after-vote").disabled = false;
       beep(980, 180);
       return;
     }
-    window.setTimeout(tick, 55 + i * 18);
+    window.setTimeout(tick, 40 + Math.floor(i / 2));
   };
   tick();
 }
 
-function renderMaps(spinId?: MapId) {
+function renderMaps() {
   const list = must("#map-list");
   list.replaceChildren();
   for (const map of MAPS) {
@@ -175,7 +205,6 @@ function renderMaps(spinId?: MapId) {
     btn.type = "button";
     btn.className = "map-card";
     if (playerVote === map.id) btn.classList.add("active");
-    if (spinId === map.id) btn.classList.add("spin-on");
     if (votePhase === "done" && selectedMap === map.id) btn.classList.add("winner");
     const art = document.createElement("span");
     art.className = `map-art ${map.art}`;
@@ -192,7 +221,7 @@ function renderMaps(spinId?: MapId) {
     en.textContent = map.nameEn;
     const count = document.createElement("span");
     count.className = "vote-count";
-    count.textContent = `${votes[map.id]}`;
+    count.textContent = `${votes[map.id]}표`;
     meta.append(mode, name, en, count);
     btn.append(art, meta);
     btn.disabled = votePhase !== "voting";
@@ -203,6 +232,7 @@ function renderMaps(spinId?: MapId) {
       votes[map.id] += 1;
       selectedMap = map.id;
       renderMaps();
+      renderTickets();
     });
     list.append(btn);
   }
@@ -234,6 +264,47 @@ function renderRoster() {
   }
 }
 
+function fillTicks(el: HTMLElement, max: number) {
+  if (el.dataset.max === String(max)) return;
+  el.dataset.max = String(max);
+  el.replaceChildren();
+  for (let i = 25; i < max; i += 25) {
+    const tick = document.createElement("i");
+    tick.style.left = `${(i / max) * 100}%`;
+    if (i % 100 === 0) tick.className = "major";
+    el.append(tick);
+  }
+}
+
+function paintOwBar(bar: HTMLElement, health: number, max: number) {
+  const fill = bar.querySelector(".hp-fill") as HTMLElement | null;
+  const ticks = bar.querySelector(".hp-ticks") as HTMLElement | null;
+  if (fill) fill.style.width = `${Math.max(0, Math.min(100, (health / max) * 100))}%`;
+  if (ticks) fillTicks(ticks, max);
+}
+
+function paintHpFloats(bars: HudSnap["hpBars"]) {
+  const root = must("#hp-floats");
+  const keep = new Set(bars.map((b) => b.id));
+  for (const node of [...root.children]) {
+    const id = (node as HTMLElement).dataset.id;
+    if (!id || !keep.has(id)) node.remove();
+  }
+  for (const b of bars) {
+    let el = root.querySelector<HTMLElement>(`[data-id="${b.id}"]`);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "hp-float";
+      el.dataset.id = b.id;
+      el.innerHTML = `<div class="ow-hp"><i class="hp-fill"></i><div class="hp-ticks"></div></div>`;
+      root.append(el);
+    }
+    el.classList.toggle("enemy", !b.ally);
+    el.style.transform = `translate(${b.x}px, ${b.y}px) translate(-50%, -100%)`;
+    paintOwBar(el.querySelector(".ow-hp") as HTMLElement, b.health, b.maxHealth);
+  }
+}
+
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
@@ -246,8 +317,9 @@ function paintHud(h: HudSnap) {
   must("#enemy-bar").style.width = `${h.enemyCap}%`;
   must("#obj-label").textContent = h.obj;
   must("#team-count").textContent = `${h.aliveAlly} vs ${h.aliveEnemy}`;
-  must("#health-bar").style.setProperty("--hp", `${(h.health / h.maxHealth) * 100}%`);
+  paintOwBar(must("#health-bar"), h.health, h.maxHealth);
   must("#health-num").textContent = `${Math.ceil(h.health)} / ${h.maxHealth}`;
+  paintHpFloats(h.hpBars);
   must("#ammo").textContent = h.ammo;
   must("#hint").textContent = h.hint;
   must("#crosshair").classList.toggle("hot", h.crosshairHot);
@@ -270,13 +342,11 @@ function paintHud(h: HudSnap) {
       ? [
           ["헬릭스", h.helix],
           ["생체장", h.field],
-          ["밀기", h.melee],
           ["궁극기", h.visor ? 0 : (100 - h.ult) / 16.6],
         ]
       : [
           ["갈고리", h.grapple],
           ["지뢰", h.mine],
-          ["밀기", h.melee],
           ["궁극기", h.infra ? 0 : (100 - h.ult) / 8.3],
         ];
   for (const [label, cd] of rows) {
@@ -295,15 +365,23 @@ function paintHud(h: HudSnap) {
   }
 }
 
-function openOverlay(title: string, copy: string, resume: boolean) {
+function openOverlay(title: string, copy: string) {
   must("#overlay").classList.remove("hidden");
   must("#overlay-title").textContent = title;
   must("#overlay-copy").textContent = copy;
-  must("#btn-resume").classList.toggle("hidden", !resume);
 }
 
 function closeOverlay() {
   must("#overlay").classList.add("hidden");
+}
+
+function showBackdrop() {
+  if (!stopLobby) stopLobby = createLobbyBackdrop(canvas);
+}
+
+function hideBackdrop() {
+  stopLobby?.();
+  stopLobby = null;
 }
 
 function leaveMatch() {
@@ -311,25 +389,44 @@ function leaveMatch() {
   match = null;
   document.body.classList.remove("playing");
   must("#hud").classList.add("hidden");
+  window.clearTimeout(killMarkTimer);
+  const mark = must("#kill-mark");
+  mark.classList.add("hidden");
+  mark.classList.remove("show");
   closeOverlay();
-  stopLobby = createLobbyBackdrop(canvas);
+  showBackdrop();
   show("home");
 }
 
 function enterMatch() {
-  stopLobby();
+  hideBackdrop();
+  match?.dispose();
+  match = null;
   document.body.classList.add("playing");
   must("#hud").classList.remove("hidden");
   closeOverlay();
   match = new Match(canvas, selected, selectedMap, selectedDiff);
   match.onHud = paintHud;
-  match.onPause = (p) => {
-    if (p) openOverlay("일시정지", "5대5 쟁탈. F3 시점. 난이도는 로비에서 고른다.", true);
-    else closeOverlay();
+  match.onKill = (head) => {
+    const mark = must("#kill-mark");
+    window.clearTimeout(killMarkTimer);
+    mark.classList.remove("hidden");
+    mark.classList.toggle("head", head);
+    mark.classList.remove("show");
+    void mark.offsetWidth;
+    mark.classList.add("show");
+    killMarkTimer = window.setTimeout(() => {
+      mark.classList.remove("show");
+      killMarkTimer = window.setTimeout(() => mark.classList.add("hidden"), 150);
+    }, 850);
   };
   match.onEnd = (r) => {
     const title = r === "win" ? "승리" : r === "lose" ? "패배" : "무승부";
-    openOverlay(title, "로비로 돌아가 맵을 다시 고를 수 있다.", false);
+    const h = match!;
+    openOverlay(
+      title,
+      `K / D / A   ${h.player.kills} / ${h.player.deaths} / ${h.player.assists}`,
+    );
   };
   match.start();
 }
@@ -343,7 +440,6 @@ document.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((btn) => {
 
 must("#btn-after-vote").addEventListener("click", () => show("heroes"));
 must("#btn-enter").addEventListener("click", enterMatch);
-must("#btn-resume").addEventListener("click", () => match?.setPaused(false));
 must("#btn-lobby").addEventListener("click", leaveMatch);
 
 renderDiff();

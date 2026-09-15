@@ -39,13 +39,13 @@
       <section id="screen-maps" class="screen hidden">
         <p class="eyebrow">CONTROL</p>
         <h2>맵 선택</h2>
-        <p class="lede" id="vote-copy">맵을 고르면 봇 9명도 투표한다. 시간이 끝나면 룰렛이 돈다.</p>
+        <p class="lede" id="vote-copy">맵에 표를 넣는다. 봇도 표를 넣고, 표끼리 추첨한다.</p>
         <div class="vote-timer" id="vote-timer">투표 8.0</div>
-        <div class="sides">
-          <div class="side"><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><span>청팀 5</span></div>
-          <div class="side red"><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><span>홍팀 5</span></div>
-        </div>
         <div class="maps" id="map-list"></div>
+        <div class="ticket-wrap">
+          <p class="ticket-label">표</p>
+          <div id="ticket-rail"></div>
+        </div>
         <nav class="menu">
           <button type="button" id="btn-after-vote" disabled>히어로 선택</button>
           <button type="button" data-go="diff" class="ghost">난이도</button>
@@ -62,9 +62,9 @@
           <button type="button" data-go="maps" class="ghost">맵</button>
         </nav>
         <p class="hint">
-          WASD · 마우스 · Space · R · V 밀기 · Esc · F3 1/3인칭<br />
+          1인칭 · WASD · 마우스 · Space · R<br />
           솔저: 좌클릭 · 우클릭 헬릭스 · Shift 질주 · E 생체장 · Q 궁<br />
-          위도우: 우클릭 유지 조준(차지 100%) · 좌클릭 발사 · Shift 갈고리 · E 지뢰 · Q 궁
+          위도우: 우클릭 유지 조준 · 좌클릭 발사 · Shift 갈고리 · E 지뢰 · Q 궁
         </p>
       </section>
     </div>
@@ -85,9 +85,37 @@
         <div id="team-count">5 vs 5</div>
       </div>
       <div id="killfeed"></div>
+      <div id="kill-mark" class="hidden">
+        <span class="gem g1"></span>
+        <span class="gem g2"></span>
+        <span class="gem g3"></span>
+        <span class="gem g4"></span>
+        <svg class="skull" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <radialGradient id="skull-glow" cx="50%" cy="40%" r="60%">
+              <stop offset="0%" stop-color="#ff4d6a" />
+              <stop offset="70%" stop-color="#e31c3d" />
+              <stop offset="100%" stop-color="#9b1028" />
+            </radialGradient>
+          </defs>
+          <path
+            fill="url(#skull-glow)"
+            d="M32 3C17.2 3 7 14.4 7 28.2c0 8.4 3.4 14.6 8.6 18.7v4.6c0 2.6 1.8 4.5 4.2 4.5h3.1l1.2 4.2c.4 1.3 1.6 2.2 3 2.2h13.8c1.4 0 2.6-.9 3-2.2l1.2-4.2h3.1c2.4 0 4.2-1.9 4.2-4.5v-4.6C53.6 42.8 57 36.6 57 28.2 57 14.4 46.8 3 32 3z"
+          />
+          <ellipse cx="22.5" cy="27" rx="6.2" ry="7.4" fill="#14080c" />
+          <ellipse cx="41.5" cy="27" rx="6.2" ry="7.4" fill="#14080c" />
+          <path d="M32 33.2 27.4 43h9.2L32 33.2z" fill="#14080c" />
+          <path d="M20 50h4.2v5.2H20zm6.4 0H31v6.2h-4.6zm6.6 0h4.6v6.2H33zm6.8 0H45v5.2h-4.6z" fill="#14080c" />
+          <path d="M18.8 37.5h26.4" stroke="#9b1028" stroke-width="1.2" />
+        </svg>
+      </div>
+      <div id="hp-floats"></div>
       <div id="bottom">
         <div id="health-wrap">
-          <div id="health-bar"></div>
+          <div id="health-bar" class="ow-hp">
+            <i class="hp-fill"></i>
+            <div class="hp-ticks"></div>
+          </div>
           <span id="health-num"></span>
         </div>
         <div id="abils"></div>
@@ -101,7 +129,6 @@
         <h2 id="overlay-title">일시정지</h2>
         <p id="overlay-copy"></p>
         <nav class="menu">
-          <button type="button" id="btn-resume">계속</button>
           <button type="button" id="btn-lobby" class="ghost">로비</button>
         </nav>
       </div>

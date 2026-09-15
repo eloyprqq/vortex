@@ -19,6 +19,7 @@ export type MapDef = {
   name: string;
   nameEn: string;
   mode: string;
+  kind: "control" | "push";
   place: string;
   blurb: string;
   art: string;
@@ -30,6 +31,8 @@ export type MapDef = {
   floor: number;
   block: number;
   nest: number;
+  skyTop: number;
+  skyLow: number;
   allySpawns: Spawn[];
   enemySpawns: Spawn[];
   allyPerch: THREE.Vector3;
@@ -63,19 +66,22 @@ export const MAPS: MapDef[] = [
     name: "궤도 관측소",
     nameEn: "ORBITAL LOOKOUT",
     mode: "쟁탈",
+    kind: "control",
     place: "저궤도 · 제1 거점",
     blurb: "중앙 원형 거점. 양쪽 고지에서 저격이 열린다.",
     art: "horizon",
     captureR: 6.4,
     floorR: 52,
     bound: 44,
-    fogNear: 28,
-    fogFar: 90,
-    floor: 0x1a2738,
-    block: 0x2a3d54,
-    nest: 0x3a2a48,
-    allySpawns: line(36, Math.PI, XS),
-    enemySpawns: line(-36, 0, XS),
+    fogNear: 40,
+    fogFar: 130,
+    floor: 0x38506e,
+    block: 0x53749d,
+    nest: 0x6b5288,
+    skyTop: 0x16224a,
+    skyLow: 0x6f86b8,
+    allySpawns: line(36, 0, XS),
+    enemySpawns: line(-36, Math.PI, XS),
     allyPerch: new THREE.Vector3(0, 4.6, 18),
     enemyPerch: new THREE.Vector3(0, 4.6, -18),
     props: [
@@ -103,20 +109,23 @@ export const MAPS: MapDef[] = [
     id: "streets",
     name: "항구 골목",
     nameEn: "HARBOR LANES",
-    mode: "쟁탈",
+    mode: "밀기",
+    kind: "push",
     place: "해안 도시 · 시장",
-    blurb: "세 갈래 길. 가운데 광장이 거점이다.",
+    blurb: "로봇을 상대 스폰 쪽으로 민다. 근처에 서야 움직인다.",
     art: "streets",
     captureR: 6.2,
     floorR: 52,
     bound: 44,
-    fogNear: 24,
-    fogFar: 86,
-    floor: 0x1c222c,
-    block: 0x3a4656,
-    nest: 0x4a3a32,
-    allySpawns: line(36, Math.PI, XS),
-    enemySpawns: line(-36, 0, XS),
+    fogNear: 36,
+    fogFar: 124,
+    floor: 0x3e4654,
+    block: 0x6d7d94,
+    nest: 0x8a6a52,
+    skyTop: 0x1d2a44,
+    skyLow: 0x9b8a92,
+    allySpawns: line(36, 0, XS),
+    enemySpawns: line(-36, Math.PI, XS),
     allyPerch: new THREE.Vector3(16, 3.2, 14),
     enemyPerch: new THREE.Vector3(-16, 3.2, -14),
     props: [
@@ -147,19 +156,22 @@ export const MAPS: MapDef[] = [
     name: "모래 원형",
     nameEn: "SAND ROTUNDA",
     mode: "쟁탈",
+    kind: "control",
     place: "사막 유적 · 원형 경기장",
     blurb: "가장 넓은 거점. 기둥이 엄폐다.",
     art: "ruins",
     captureR: 7.2,
     floorR: 56,
     bound: 48,
-    fogNear: 32,
-    fogFar: 96,
-    floor: 0x2a241c,
-    block: 0x5a4a38,
-    nest: 0x6a5038,
-    allySpawns: line(40, Math.PI, XS),
-    enemySpawns: line(-40, 0, XS),
+    fogNear: 44,
+    fogFar: 138,
+    floor: 0x6d5c42,
+    block: 0xa88d64,
+    nest: 0xb8945e,
+    skyTop: 0x2f4a74,
+    skyLow: 0xd8b184,
+    allySpawns: line(40, 0, XS),
+    enemySpawns: line(-40, Math.PI, XS),
     allyPerch: new THREE.Vector3(22, 3.6, 10),
     enemyPerch: new THREE.Vector3(-22, 3.6, -10),
     props: [
