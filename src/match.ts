@@ -9,8 +9,8 @@ import {
   resolveMove,
   type Aabb,
 } from "./arena";
-import { Fighter } from "./fighter";
-import { heroById, type HeroId } from "./heroes";
+import { Fighter, type Team } from "./fighter";
+import { heroById, otherHero, type HeroId } from "./heroes";
 import { Input } from "./input";
 import { difficultyById, type Difficulty, type DifficultyId } from "./difficulty";
 import { mapById, type MapDef, type MapId } from "./maps";
@@ -33,6 +33,13 @@ type Field = {
   pos: THREE.Vector3;
   owner: Fighter;
   life: number;
+};
+
+type Decoy = {
+  mesh: THREE.Group;
+  vel: THREE.Vector3;
+  life: number;
+  team: Team;
 };
 
 export type HudSnap = {
@@ -78,6 +85,7 @@ export class Match {
   private rockets: Rocket[] = [];
   private mines: Mine[] = [];
   private fields: Field[] = [];
+  private decoys: Decoy[] = [];
   private ray = new THREE.Raycaster();
   private ndc = new THREE.Vector2(0, 0);
   private wish = new THREE.Vector3();
@@ -147,13 +155,13 @@ export class Match {
     this.colliders = built.colliders;
     this.worldHits = built.meshes;
 
-    const allyMix: HeroId[] = ["soldier76", "widowmaker", "soldier76", "widowmaker", "soldier76"];
-    const enemyMix: HeroId[] = ["widowmaker", "soldier76", "widowmaker", "soldier76", "widowmaker"];
+    const allyMix: HeroId[] = ["soldier76", "widowmaker", "nova", "soldier76", "widowmaker"];
+    const enemyMix: HeroId[] = ["nova", "widowmaker", "soldier76", "nova", "widowmaker"];
     this.player = new Fighter("you", "ally", hero, this.map.allySpawns[0]);
     this.scene.add(this.player.group);
     this.fighters.push(this.player);
     for (let i = 1; i < 5; i++) {
-      const id = allyMix[i] === hero ? (hero === "soldier76" ? "widowmaker" : "soldier76") : allyMix[i];
+      const id = allyMix[i] === hero ? otherHero(hero) : allyMix[i];
       const f = new Fighter(`ally${i}`, "ally", id, this.map.allySpawns[i]);
       this.scene.add(f.group);
       this.fighters.push(f);
@@ -289,6 +297,8 @@ export class Match {
     }
     if (f.sprinting) speed *= 1.55;
     if (f.scoped) speed *= 0.55;
+    if (f.cloakT > 0) speed *= 1.12;
+    if (f.slowT > 0) speed *= 0.45;
 
     if (f.grappleT > 0 && f.grappleTo) {
       f.grappleT -= dt;
@@ -331,7 +341,8 @@ export class Match {
     f.group.rotation.y = f.yaw;
 
     if (soldier) this.tickSoldier(f, dt, isPlayer);
-    else this.tickWidow(f, dt, isPlayer);
+    else if (f.heroId === "widowmaker") this.tickWidow(f, dt, isPlayer);
+    else this.tickNova(f, dt, isPlayer);
   }
 
   private tickStatus(f: Fighter, dt: number) {
@@ -343,6 +354,9 @@ export class Match {
     f.meleeCd = Math.max(0, f.meleeCd - dt);
     f.visorT = Math.max(0, f.visorT - dt);
     f.infraT = Math.max(0, f.infraT - dt);
+    f.slowT = Math.max(0, f.slowT - dt);
+    f.cloakT = Math.max(0, f.cloakT - dt);
+    this.applyCloak(f);
     if (f.reload > 0) {
       f.reload -= dt;
       if (f.reload <= 0) f.ammo = f.maxAmmo;
@@ -432,6 +446,106 @@ export class Match {
       f.fireCd = 0.12 / (f === this.player ? 1 : this.bot(f).fire);
       this.hitscan(f, 13, 1, 0.03 + extra, 40);
     }
+  }
+
+  private tickNova(f: Fighter, _dt: number, isPlayer: boolean) {
+    if (isPlayer && this.viewAct !== "idle") return;
+    if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) f.reload = 1.35;
+    if (isPlayer && (this.input.keys.has("ShiftLeft") || this.input.keys.has("ShiftRight")) && f.fieldCd <= 0) {
+      f.fieldCd = 12;
+      f.cloakT = 6;
+    }
+    if (isPlayer && this.input.keys.has("KeyE") && f.mineCd <= 0) this.spawnDecoy(f);
+    if (isPlayer && this.input.rmbDown && f.helixCd <= 0) this.firePin(f);
+    if (isPlayer && this.input.keys.has("KeyQ") && f.ult >= 100) {
+      f.ult = 0;
+      f.visorT = 1.6;
+    }
+    if (f.visorT > 0) {
+      if (isPlayer) this.assistAim(f);
+      if (f.fireCd <= 0) this.fireNova(f, 82, 0.012);
+      return;
+    }
+    const shoot = isPlayer
+      ? this.input.lmb
+      : f.fireCd <= 0 && Math.random() < this.bot(f).fireGate;
+    if (shoot) this.fireNova(f, 36, isPlayer ? 0.01 : 0.028);
+  }
+
+  private fireNova(f: Fighter, dmg: number, spread: number) {
+    if (f.fireCd > 0 || f.reload > 0) return;
+    if (f.ammo <= 0) {
+      f.reload = 1.35;
+      return;
+    }
+    f.ammo -= 1;
+    f.cloakT = 0;
+    const botMul = f === this.player ? 1 : this.bot(f).fire;
+    f.fireCd = (f.visorT > 0 ? 0.38 : 0.32) / botMul;
+    this.hitscan(f, dmg, 2.2, spread + (f === this.player ? 0 : this.bot(f).spread), 70);
+  }
+
+  private firePin(f: Fighter) {
+    f.helixCd = 8;
+    f.cloakT = 0;
+    this.aimRay(f, f === this.player ? 0.008 : this.bot(f).spread);
+    const hits = this.ray.intersectObjects(this.hitables(f), false);
+    const first = hits.find((h) => h.distance <= 45);
+    if (!first) {
+      this.tracer(this.ray.ray.origin, this.ray.ray.direction, 22, 0x4ecdc4);
+      return;
+    }
+    this.tracer(this.ray.ray.origin, this.ray.ray.direction, first.distance, 0x4ecdc4);
+    const target = first.object.userData.hit as Fighter | undefined;
+    if (!target || !target.alive || target.team === f.team) return;
+    this.hurt(target, 40, f, true, first.object.userData.part === "head");
+    if (target.alive) target.slowT = Math.max(target.slowT, 2.2);
+  }
+
+  private spawnDecoy(f: Fighter) {
+    f.mineCd = 12;
+    const mesh = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.32, 1.12, 6, 10),
+      new THREE.MeshStandardMaterial({
+        color: 0x1c2e38,
+        transparent: true,
+        opacity: 0.7,
+        emissive: 0x4ecdc4,
+        emissiveIntensity: 0.35,
+      }),
+    );
+    body.position.y = 0.85;
+    mesh.add(body);
+    mesh.position.copy(f.group.position);
+    f.lookDir(this.tmp);
+    this.scene.add(mesh);
+    this.decoys.push({
+      mesh,
+      vel: this.tmp.clone().setY(0).normalize().multiplyScalar(4.2),
+      life: 4,
+      team: f.team,
+    });
+  }
+
+  private applyCloak(f: Fighter) {
+    const cloaked = f.cloakT > 0 && f.alive;
+    const allySee = f.team === this.player.team;
+    f.group.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      if (o === f.outline) {
+        o.visible = !cloaked && f !== this.player && f.alive;
+        return;
+      }
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        const mat = m as THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
+        if (!("opacity" in mat)) continue;
+        mat.transparent = cloaked;
+        mat.opacity = cloaked ? (allySee ? 0.28 : 0.04) : 1;
+        mat.depthWrite = !cloaked;
+      }
+    });
   }
 
   private hitscan(f: Fighter, damage: number, headMul: number, spread: number, range: number) {
@@ -610,8 +724,19 @@ export class Match {
       }
     }
 
+    for (let i = this.decoys.length - 1; i >= 0; i--) {
+      const d = this.decoys[i];
+      d.life -= dt;
+      d.mesh.position.x += d.vel.x * dt;
+      d.mesh.position.z += d.vel.z * dt;
+      if (d.life <= 0) {
+        this.scene.remove(d.mesh);
+        this.decoys.splice(i, 1);
+      }
+    }
+
     for (const f of this.fighters) {
-      f.outline.visible = f !== this.player && f.alive;
+      f.outline.visible = f !== this.player && f.alive && f.cloakT <= 0;
     }
   }
 
@@ -648,6 +773,7 @@ export class Match {
   private hurt(target: Fighter, amount: number, src: Fighter, credit: boolean, headshot = false) {
     if (!target.alive || amount <= 0) return;
     target.health -= amount;
+    target.cloakT = 0;
     if (credit && src.team !== target.team) {
       src.ult = Math.min(100, src.ult + amount * 0.12);
       target.hits.push({ id: src.id, team: src.team, t: performance.now() });
@@ -705,13 +831,13 @@ export class Match {
     const metal = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.45, metalness: 0.5, fog: false });
     const dark = new THREE.MeshStandardMaterial({ color: 0x1f242e, roughness: 0.6, fog: false });
     const glove = new THREE.MeshStandardMaterial({
-      color: hero === "widowmaker" ? 0x6a3a58 : 0xb08968,
+      color: hero === "widowmaker" ? 0x6a3a58 : hero === "nova" ? 0x2a3a40 : 0xb08968,
       roughness: 0.78,
       fog: false,
     });
     const trim = new THREE.MeshStandardMaterial({
-      color: hero === "widowmaker" ? 0x9c4a92 : 0xd8ae34,
-      emissive: hero === "widowmaker" ? 0x5a2050 : 0x6a5410,
+      color: hero === "widowmaker" ? 0x9c4a92 : hero === "nova" ? 0x4ecdc4 : 0xd8ae34,
+      emissive: hero === "widowmaker" ? 0x5a2050 : hero === "nova" ? 0x1a5a55 : 0x6a5410,
       emissiveIntensity: 0.6,
       fog: false,
     });
@@ -723,11 +849,11 @@ export class Match {
       return m;
     };
 
-    const receiver = hero === "widowmaker" ? 0.42 : 0.4;
+    const receiver = hero === "widowmaker" || hero === "nova" ? 0.42 : 0.4;
     box(0.09, 0.13, receiver, dark, 0, 0, 0.06);
     box(0.075, 0.1, 0.16, dark, 0, -0.02, 0.32);
 
-    if (hero === "widowmaker") {
+    if (hero === "widowmaker" || hero === "nova") {
       box(0.045, 0.045, 0.78, metal, 0, 0.01, -0.62);
       box(0.05, 0.05, 0.28, trim, 0, 0.12, -0.04);
       box(0.02, 0.06, 0.02, metal, 0, 0.09, 0.06);
@@ -968,6 +1094,7 @@ export class Match {
     for (const f of this.fighters) {
       if (!f.alive) continue;
       if (f === this.player) continue;
+      if (f.cloakT > 0 && f.team === "enemy" && (this.hpReveal.get(f.id) ?? 0) <= 0) continue;
       const enemy = f.team === "enemy";
       if (enemy && (this.hpReveal.get(f.id) ?? 0) <= 0) continue;
       this.tmp.set(f.group.position.x, f.group.position.y + f.height + 0.32, f.group.position.z);
@@ -999,6 +1126,7 @@ export class Match {
     let bestD = 1e9;
     for (const o of this.fighters) {
       if (!o.alive || o.team === f.team) continue;
+      if (o.cloakT > 0 && o.group.position.distanceTo(f.group.position) > 3.2) continue;
       const d = o.group.position.distanceTo(f.group.position);
       if (d < bestD) {
         bestD = d;
@@ -1036,6 +1164,24 @@ export class Match {
         if (f.ult >= 100 && (f.team === "ally" || this.diff.enemyUlt)) {
           f.ult = 0;
           f.visorT = 6;
+        }
+      } else if (f.heroId === "nova") {
+        if (f.fieldCd <= 0 && foe && f.group.position.distanceTo(foe.group.position) < 14 && Math.random() < 0.08) {
+          f.fieldCd = 12;
+          f.cloakT = 6;
+        }
+        if (f.mineCd <= 0 && Math.random() < 0.04) this.spawnDecoy(f);
+        if (foe && f.helixCd <= 0 && this.canSee(f, foe) && Math.random() < 0.12) {
+          this.lookAt(f, foe);
+          this.firePin(f);
+        }
+        if (foe && f.fireCd <= 0 && this.canSee(f, foe) && Math.random() < this.bot(f).fireGate) {
+          this.lookAt(f, foe);
+          this.fireNova(f, 36, 0.03);
+        }
+        if (f.ult >= 100 && foe && (f.team === "ally" || this.diff.enemyUlt)) {
+          f.ult = 0;
+          f.visorT = 1.6;
         }
       } else if (foe) {
         const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
@@ -1173,6 +1319,7 @@ export class Match {
   }
 
   private canSee(a: Fighter, b: Fighter) {
+    if (b.cloakT > 0 && a.group.position.distanceTo(b.group.position) > 3.2) return false;
     a.eye(this.tmp);
     b.eye(this.tmp2);
     const dist = this.tmp.distanceTo(this.tmp2);

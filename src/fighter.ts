@@ -33,6 +33,8 @@ export class Fighter {
   scoped = false;
   charge = 0;
   poisonT = 0;
+  cloakT = 0;
+  slowT = 0;
   alive = true;
   respawn = 0;
   healT = 0;
@@ -66,6 +68,9 @@ export class Fighter {
     if (this.heroId === "soldier76") {
       this.maxAmmo = 25;
       this.ammo = 25;
+    } else if (this.heroId === "nova") {
+      this.maxAmmo = 12;
+      this.ammo = 12;
     } else {
       this.maxAmmo = 35;
       this.ammo = 35;
@@ -92,6 +97,8 @@ export class Fighter {
     this.health = this.maxHealth;
     this.alive = true;
     this.poisonT = 0;
+    this.cloakT = 0;
+    this.slowT = 0;
     this.healT = 0;
     this.grappleT = 0;
     this.grappleTo = null;
@@ -116,7 +123,7 @@ export class Fighter {
   }
 
   private buildMesh(color: number, accent: number) {
-    const slim = this.heroId === "widowmaker";
+    const slim = this.heroId === "widowmaker" || this.heroId === "nova";
     this.height = slim ? 1.78 : 1.7;
     this.body = new THREE.Mesh(
       new THREE.CapsuleGeometry(slim ? 0.32 : 0.38, slim ? 1.12 : 1.02, 6, 12),
@@ -152,6 +159,7 @@ export class Fighter {
     this.group.add(this.head);
 
     if (this.heroId === "widowmaker") this.dressWidow(accent);
+    else if (this.heroId === "nova") this.dressNova(accent);
     else this.dressSoldier(accent);
   }
 
@@ -239,6 +247,41 @@ export class Fighter {
     scope.position.set(0, 0.1, -0.15);
     rifle.add(barrel, scope);
     rifle.position.set(0.34, 1.15, -0.55);
+    this.group.add(rifle);
+  }
+
+  private dressNova(accent: number) {
+    const suit = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4, 0.68, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x1a2830, roughness: 0.4, metalness: 0.35 }),
+    );
+    suit.position.y = 1.1;
+    this.group.add(suit);
+    const hair = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.12, 0.32),
+      new THREE.MeshStandardMaterial({ color: 0xd8c9a0, roughness: 0.65 }),
+    );
+    hair.position.set(0, this.height + 0.02, 0.04);
+    this.group.add(hair);
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.08, 0.08),
+      new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.7 }),
+    );
+    visor.position.set(0, this.height - 0.08, -0.18);
+    this.group.add(visor);
+    const rifle = new THREE.Group();
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.032, 0.028, 1.45, 8),
+      new THREE.MeshStandardMaterial({ color: 0x12181c, metalness: 0.65, roughness: 0.28 }),
+    );
+    barrel.rotation.x = Math.PI / 2;
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.04, 0.5),
+      new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.35 }),
+    );
+    rail.position.set(0, 0.06, -0.1);
+    rifle.add(barrel, rail);
+    rifle.position.set(0.36, 1.12, -0.48);
     this.group.add(rifle);
   }
 }

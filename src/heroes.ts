@@ -1,4 +1,4 @@
-export type HeroId = "soldier76" | "widowmaker";
+export type HeroId = "soldier76" | "widowmaker" | "nova";
 
 export type HeroDef = {
   id: HeroId;
@@ -53,7 +53,29 @@ export const HEROES: HeroDef[] = [
       ultimate: "적외선 투시",
     },
   },
+  {
+    id: "nova",
+    name: "노바",
+    role: "딜러",
+    blurb: "저격소총 · 속박탄 · 은폐 · 홀로그램 · 삼연사",
+    health: 175,
+    speed: 5.6,
+    color: 0x1c2e38,
+    accent: 0x4ecdc4,
+    abilities: {
+      primary: "저격소총",
+      secondary: "속박탄",
+      ability1: "은폐",
+      ability2: "홀로그램",
+      ultimate: "삼연사",
+    },
+  },
 ];
+
+export function otherHero(id: HeroId): HeroId {
+  const h = HEROES.find((x) => x.id !== id);
+  return h ? h.id : "soldier76";
+}
 
 export function heroById(id: HeroId): HeroDef {
   const h = HEROES.find((x) => x.id === id);

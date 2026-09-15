@@ -344,11 +344,18 @@ function paintHud(h: HudSnap) {
           ["생체장", h.field],
           ["궁극기", h.visor ? 0 : (100 - h.ult) / 16.6],
         ]
-      : [
-          ["갈고리", h.grapple],
-          ["지뢰", h.mine],
-          ["궁극기", h.infra ? 0 : (100 - h.ult) / 8.3],
-        ];
+      : h.hero === "nova"
+        ? [
+            ["은폐", h.field],
+            ["홀로그램", h.mine],
+            ["속박탄", h.helix],
+            ["궁극기", h.visor ? 0 : (100 - h.ult) / 12],
+          ]
+        : [
+            ["갈고리", h.grapple],
+            ["지뢰", h.mine],
+            ["궁극기", h.infra ? 0 : (100 - h.ult) / 8.3],
+          ];
   for (const [label, cd] of rows) {
     const el = document.createElement("div");
     el.className = "abil";
