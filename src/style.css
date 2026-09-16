@@ -237,6 +237,89 @@ body.playing #vignette {
   border-color: #ff4d6a;
 }
 
+#crosshair .hm {
+  position: absolute;
+  background: #f4f7fb;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#crosshair .hm.n,
+#crosshair .hm.s {
+  left: 50%;
+  width: 2px;
+  height: 8px;
+  margin-left: -1px;
+}
+
+#crosshair .hm.n {
+  top: -16px;
+}
+
+#crosshair .hm.s {
+  bottom: -16px;
+}
+
+#crosshair .hm.e,
+#crosshair .hm.w {
+  top: 50%;
+  width: 8px;
+  height: 2px;
+  margin-top: -1px;
+}
+
+#crosshair .hm.e {
+  right: -16px;
+}
+
+#crosshair .hm.w {
+  left: -16px;
+}
+
+#crosshair.hit .hm {
+  opacity: 1;
+}
+
+#crosshair.head .hm {
+  background: #f5c518;
+}
+
+#dmg-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dmg-num {
+  position: absolute;
+  font-weight: 800;
+  font-size: 18px;
+  color: #f4f7fb;
+  text-shadow: 0 1px 0 #111;
+  animation: dmg-float 0.7s ease-out forwards;
+}
+
+.dmg-num.head {
+  color: #f5c518;
+  font-size: 22px;
+}
+
+@keyframes dmg-float {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 42px));
+  }
+}
+
+#hud.infra {
+  box-shadow: inset 0 0 80px rgba(232, 160, 200, 0.28);
+}
+
 #scope {
   position: absolute;
   inset: 0;
@@ -517,6 +600,11 @@ body.playing #vignette {
   margin-bottom: 22px;
 }
 
+#diff-list {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-width: none;
+}
+
 .map-card {
   padding: 0;
   overflow: hidden;
@@ -548,6 +636,22 @@ body.playing #vignette {
 
 .map-art.ruins {
   background: #3a3224;
+}
+
+.map-art.easy {
+  background: #1a3a4a;
+}
+
+.map-art.normal {
+  background: #2a2436;
+}
+
+.map-art.hard {
+  background: #3a3224;
+}
+
+.map-art.extreme {
+  background: #5a1018;
 }
 
 .map-meta {

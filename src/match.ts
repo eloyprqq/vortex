@@ -10,8 +10,9 @@ import {
   type Aabb,
 } from "./arena";
 import { Fighter } from "./fighter";
-import { heroById, otherHero, type HeroId } from "./heroes";
+import { heroById, type HeroId } from "./heroes";
 import { Input } from "./input";
+import { sfx, unlockSfx } from "./sfx";
 import { difficultyById, type Difficulty, type DifficultyId } from "./difficulty";
 import { mapById, type MapDef, type MapId } from "./maps";
 
@@ -126,6 +127,7 @@ export class Match {
   onPause: (p: boolean) => void = () => {};
   onEnd: (r: "win" | "lose" | "draw") => void = () => {};
   onKill: (headshot: boolean) => void = () => {};
+  onHit: (hit: { dmg: number; head: boolean; x: number; y: number }) => void = () => {};
   private robot = new THREE.Group();
   private robotProg = 0.5;
   private pushLen = 0;
@@ -162,8 +164,6 @@ export class Match {
     this.colliders = built.colliders;
     this.worldHits = built.meshes;
 
-    const allyMix: HeroId[] = ["soldier76", "widowmaker", "nova", "soldier76", "widowmaker"];
-    const enemyMix: HeroId[] = ["nova", "widowmaker", "soldier76", "nova", "widowmaker"];
     this.player = new Fighter("you", "ally", hero, this.map.allySpawns[0]);
     this.scene.add(this.player.group);
     this.fighters.push(this.player);
@@ -175,17 +175,26 @@ export class Match {
       this.scene.add(foe.group);
       this.fighters.push(foe);
     } else {
-      for (let i = 1; i < 5; i++) {
-        const id = allyMix[i] === hero ? otherHero(hero) : allyMix[i];
-        const f = new Fighter(`ally${i}`, "ally", id, this.map.allySpawns[i]);
+      const allyBots: HeroId[] =
+        hero === "nova"
+          ? ["soldier76", "widowmaker", "soldier76", "widowmaker"]
+          : ["nova", "soldier76", "widowmaker", hero === "soldier76" ? "widowmaker" : "soldier76"];
+      allyBots.forEach((id, i) => {
+        const f = new Fighter(`ally${i + 1}`, "ally", id, this.map.allySpawns[i + 1]);
         this.scene.add(f.group);
         this.fighters.push(f);
-      }
-      for (let i = 0; i < 5; i++) {
-        const f = new Fighter(`enemy${i}`, "enemy", enemyMix[i], this.map.enemySpawns[i]);
+      });
+      const enemyBots: HeroId[] = ["nova", "soldier76", "widowmaker", "soldier76", "widowmaker"];
+      enemyBots.forEach((id, i) => {
+        const f = new Fighter(`enemy${i}`, "enemy", id, this.map.enemySpawns[i]);
         this.scene.add(f.group);
         this.fighters.push(f);
-      }
+      });
+    }
+    for (const f of this.fighters) {
+      if (f.team !== "enemy" || this.diff.enemyHp === 1) continue;
+      f.maxHealth = Math.round(f.maxHealth * this.diff.enemyHp);
+      f.health = f.maxHealth;
     }
 
     this.onResize = () => {
@@ -198,6 +207,7 @@ export class Match {
     window.addEventListener("resize", this.onResize);
 
     canvas.addEventListener("click", () => {
+      unlockSfx();
       if (!this.ended && !this.paused) this.input.requestLock();
     });
     this.ray.layers.enable(0);
@@ -445,6 +455,7 @@ export class Match {
     if (isPlayer && this.input.keys.has("KeyQ") && f.ult >= 100) {
       f.ult = 0;
       f.visorT = 6;
+      sfx.ult();
     }
     if (f.visorT > 0 && isPlayer) this.assistAim(f);
 
@@ -467,6 +478,7 @@ export class Match {
     if (isPlayer && this.input.keys.has("KeyQ") && f.ult >= 100) {
       f.ult = 0;
       f.infraT = 12;
+      sfx.ult();
     }
     if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) this.beginReload(f, 1.4);
 
@@ -488,6 +500,7 @@ export class Match {
     const spread = (f.visorT > 0 && f === this.player ? 0 : 0.018) + (f === this.player ? 0 : this.bot(f).spread);
     this.hitscan(f, 19, 1, spread, 55);
     this.kickView(f, 0.048);
+    if (f === this.player) sfx.fire("pulse");
   }
 
   private fireWidow(f: Fighter) {
@@ -509,6 +522,7 @@ export class Match {
       this.hitscan(f, 13, 1, 0.03 + extra, 40);
       this.kickView(f, 0.055);
     }
+    if (f === this.player) sfx.fire("sniper");
   }
 
   private tickNova(f: Fighter, _dt: number, isPlayer: boolean) {
@@ -527,6 +541,7 @@ export class Match {
     if (isPlayer && this.input.keys.has("KeyQ") && f.ult >= 100) {
       f.ult = 0;
       this.spawnHealZone(f);
+      sfx.ult();
     }
     if (f.burstLeft > 0) {
       this.tickNovaBurst(f);
@@ -574,6 +589,7 @@ export class Match {
     const spread = (f === this.player ? 0.016 : 0.03) + (f === this.player ? 0 : this.bot(f).spread);
     this.hitscan(f, 8, 1.7, spread, 42);
     this.kickView(f, 0.036);
+    if (f === this.player) sfx.fire("burst");
   }
 
   private applyCloak(f: Fighter) {
@@ -614,6 +630,7 @@ export class Match {
     const part = first.object.userData.part as string;
     const dealt = part === "head" ? damage * headMul : damage;
     this.hurt(target, dealt, f, true, part === "head");
+    if (f === this.player) this.flashHit(dealt, part === "head", first.point);
   }
 
   private aimRay(f: Fighter, spread: number) {
@@ -633,6 +650,7 @@ export class Match {
 
   private fireHelix(f: Fighter) {
     f.helixCd = 6;
+    if (f === this.player) sfx.fire("helix");
     this.aimRay(f, f === this.player ? 0 : this.bot(f).spread * 1.4);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.14, 10, 8),
@@ -694,11 +712,11 @@ export class Match {
     pos.y = 0.06;
     mesh.position.copy(pos);
     this.scene.add(mesh);
-    this.fields.push({ mesh, pos, owner: f, life: 8, kind: "haste", radius, healRate: 0 });
+    this.fields.push({ mesh, pos, owner: f, life: 8, kind: "haste", radius, healRate: 16 });
   }
 
   private spawnHealZone(f: Fighter) {
-    const radius = 5;
+    const radius = 5.5;
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(radius, radius, 0.1, 32, 1, true),
       new THREE.MeshBasicMaterial({ color: 0x86efac, transparent: true, opacity: 0.42, side: THREE.DoubleSide }),
@@ -719,7 +737,7 @@ export class Match {
     pos.y = 0.06;
     mesh.position.copy(pos);
     this.scene.add(mesh);
-    this.fields.push({ mesh, pos, owner: f, life: 15, kind: "heal", radius, healRate: 22 });
+    this.fields.push({ mesh, pos, owner: f, life: 15, kind: "heal", radius, healRate: 38 });
   }
 
   private grapple(f: Fighter) {
@@ -818,16 +836,51 @@ export class Match {
     }
 
     for (const f of this.fighters) {
-      f.outline.visible = f !== this.player && f.alive && f.cloakT <= 0;
+      if (f === this.player) {
+        f.outline.visible = false;
+        continue;
+      }
+      const mat = f.outline.material as THREE.MeshBasicMaterial;
+      const infra = this.player.alive && this.player.infraT > 0 && f.team === "enemy" && f.alive;
+      if (infra) {
+        f.outline.visible = true;
+        mat.depthTest = false;
+        mat.depthWrite = false;
+        mat.color.setHex(0xff6b8a);
+        f.outline.renderOrder = 24;
+      } else {
+        mat.depthTest = true;
+        mat.depthWrite = false;
+        mat.color.setHex(f.team === "ally" ? 0x3d9eff : 0xff3b5c);
+        f.outline.renderOrder = 9;
+        f.outline.visible = f.alive && f.cloakT <= 0;
+      }
     }
   }
 
   private explode(at: THREE.Vector3, owner: Fighter, dmg: number, radius: number) {
+    if (owner === this.player) sfx.boom();
     for (const f of this.fighters) {
       if (!f.alive || f.team === owner.team) continue;
       const d = f.group.position.distanceTo(at);
-      if (d < radius) this.hurt(f, dmg * (1 - d / radius), owner, true);
+      if (d < radius) {
+        const dealt = dmg * (1 - d / radius);
+        this.hurt(f, dealt, owner, true);
+        if (owner === this.player) this.flashHit(dealt, false, f.group.position);
+      }
     }
+  }
+
+  private flashHit(dmg: number, head: boolean, at: THREE.Vector3) {
+    sfx.hit(head);
+    this.tmp.copy(at);
+    this.tmp.project(this.camera);
+    this.onHit({
+      dmg: Math.max(1, Math.round(dmg)),
+      head,
+      x: (this.tmp.x * 0.5 + 0.5) * innerWidth,
+      y: (-this.tmp.y * 0.5 + 0.5) * innerHeight,
+    });
   }
 
   private tracer(from: THREE.Vector3, dir: THREE.Vector3, len: number, color: number) {
@@ -854,10 +907,11 @@ export class Match {
 
   private hurt(target: Fighter, amount: number, src: Fighter, credit: boolean, headshot = false) {
     if (!target.alive || amount <= 0) return;
+    if (src.team === "enemy" && src !== target) amount *= this.diff.enemyDmg;
     target.health -= amount;
     target.cloakT = 0;
     if (credit && src.team !== target.team) {
-      src.ult = Math.min(100, src.ult + amount * 0.12);
+      src.ult = Math.min(100, src.ult + amount * 0.12 * (src.team === "enemy" ? this.diff.enemyUltGain : 1));
       target.hits.push({ id: src.id, team: src.team, t: performance.now() });
     }
     if (src === this.player && target.team === "enemy") this.hpReveal.set(target.id, 5);
@@ -865,12 +919,12 @@ export class Match {
       target.health = 0;
       target.alive = false;
       target.group.visible = false;
-      target.respawn = 5;
+      target.respawn = this.spawnWait(target);
       target.scoped = false;
       target.deaths += 1;
       if (credit) {
         src.kills += 1;
-        src.ult = Math.min(100, src.ult + 20);
+        src.ult = Math.min(100, src.ult + 20 * (src.team === "enemy" ? this.diff.enemyUltGain : 1));
         const now = performance.now();
         const helped = new Set<string>();
         for (const h of target.hits) {
@@ -885,7 +939,10 @@ export class Match {
           t: 4,
           text: `${heroById(src.heroId).name}  →  ${heroById(target.heroId).name}`,
         });
-        if (src === this.player) this.onKill(headshot);
+        if (src === this.player) {
+          sfx.kill();
+          this.onKill(headshot);
+        }
         if (this.duel && src.kills >= DUEL_KILLS) {
           this.endMatch(src === this.player ? "win" : "lose");
         }
@@ -1300,9 +1357,9 @@ export class Match {
     for (const f of this.fighters) {
       if (!f.alive) continue;
       if (f === this.player) continue;
-      if (f.cloakT > 0 && f.team === "enemy" && (this.hpReveal.get(f.id) ?? 0) <= 0) continue;
+      if (f.cloakT > 0 && f.team === "enemy" && (this.hpReveal.get(f.id) ?? 0) <= 0 && this.player.infraT <= 0) continue;
       const enemy = f.team === "enemy";
-      if (enemy && (this.hpReveal.get(f.id) ?? 0) <= 0) continue;
+      if (enemy && (this.hpReveal.get(f.id) ?? 0) <= 0 && this.player.infraT <= 0) continue;
       this.tmp.set(f.group.position.x, f.group.position.y + f.height + 0.32, f.group.position.z);
       this.tmp.project(this.camera);
       if (this.tmp.z < -1 || this.tmp.z > 1 || this.tmp.x < -1.15 || this.tmp.x > 1.15) continue;
@@ -1376,9 +1433,12 @@ export class Match {
           f.fieldCd = 10;
           f.flyT = 4;
         }
-        if (f.ult >= 100 && (f.health < f.maxHealth * 0.7 || foe) && (f.team === "ally" || this.diff.enemyUlt)) {
-          f.ult = 0;
-          this.spawnHealZone(f);
+        if (f.ult >= 100 && (f.team === "ally" || this.diff.enemyUlt)) {
+          const need = this.fighters.some((x) => x.team === f.team && x.alive && x.health < x.maxHealth * 0.75);
+          if (need || foe) {
+            f.ult = 0;
+            this.spawnHealZone(f);
+          }
         }
       } else if (foe) {
         const d = f.group.position.distanceTo(foe.group.position);
@@ -1547,6 +1607,12 @@ export class Match {
     return !walls.length || walls[0].distance > dist - 0.4;
   }
 
+  private spawnWait(f: Fighter) {
+    if (f === this.player) return this.diff.playerRespawn;
+    if (f.team === "enemy") return this.diff.enemyRespawn;
+    return this.diff.allyRespawn;
+  }
+
   private bot(f: Fighter) {
     const enemy = f.team === "enemy";
     return {
@@ -1554,7 +1620,7 @@ export class Match {
       hit: enemy ? this.diff.enemyHit : this.diff.allyHit,
       fire: enemy ? this.diff.enemyFire : this.diff.allyFire,
       jitter: enemy ? this.diff.enemyJitter : this.diff.allyJitter,
-      fireGate: enemy ? 0.55 : 0.8,
+      fireGate: enemy ? this.diff.enemyFireGate : this.diff.allyFireGate,
     };
   }
 

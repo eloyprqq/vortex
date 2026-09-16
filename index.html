@@ -29,7 +29,7 @@
       <section id="screen-diff" class="screen hidden">
         <p class="eyebrow">SKILL TIER</p>
         <h2>난이도</h2>
-        <p class="lede">상대 봇 조준만 바꾼다. 아군 봇은 쉬움에서 더 잘 도와준다.</p>
+        <p class="lede">상대 봇 세기. 익스트림은 조준만 더 정확하다.</p>
         <div class="maps" id="diff-list"></div>
         <nav class="menu">
           <button type="button" data-go="maps">이 난이도로</button>
@@ -72,7 +72,13 @@
     </div>
 
     <div id="hud" class="hidden">
-      <div id="crosshair"></div>
+      <div id="crosshair">
+        <i class="hm n"></i>
+        <i class="hm e"></i>
+        <i class="hm s"></i>
+        <i class="hm w"></i>
+      </div>
+      <div id="dmg-layer"></div>
       <div id="scope" class="hidden">
         <div id="charge-ring"><i id="charge-fill"></i></div>
         <div id="charge-num">0%</div>

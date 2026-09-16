@@ -56,9 +56,9 @@ export const HEROES: HeroDef[] = [
   {
     id: "nova",
     name: "노바",
-    role: "딜러",
+    role: "힐러",
     blurb: "점사 기관단총 · 비행 · 가속 장판 · 치유 구역",
-    health: 175,
+    health: 200,
     speed: 5.6,
     color: 0x1c2e38,
     accent: 0x4ecdc4,

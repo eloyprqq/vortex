@@ -4,6 +4,7 @@ import { HEROES, type HeroId } from "./heroes";
 import { createLobbyBackdrop } from "./lobbyBackdrop";
 import { MAPS, mapById, type MapId } from "./maps";
 import { DUEL_KILLS, Match, type HudSnap, type MatchFormat } from "./match";
+import { unlockSfx } from "./sfx";
 
 type Screen = "home" | "diff" | "maps" | "heroes";
 
@@ -27,6 +28,7 @@ let voteLeft = 8;
 let voteTick: number | null = null;
 let voteBots: number[] = [];
 let killMarkTimer = 0;
+let hitMarkTimer = 0;
 
 const screens: Record<Screen, HTMLElement> = {
   home: must("#screen-home"),
@@ -53,7 +55,7 @@ function show(name: Screen) {
     must("#hero-map-copy").textContent =
       selectedFormat === "1v1"
         ? `1v1 · ${DUEL_KILLS}킬 선승 · ${m.name} · ${diffName}`
-        : `${m.mode} · ${m.name}. 난이도 ${diffName}.`;
+        : `${m.mode} · ${m.name} · ${diffName}. 힐러 노바가 양 팀에 들어간다.`;
   }
 }
 
@@ -66,12 +68,12 @@ function renderDiff() {
     btn.className = "map-card";
     btn.classList.toggle("active", d.id === selectedDiff);
     const art = document.createElement("span");
-    art.className = `map-art ${d.id === "easy" ? "horizon" : d.id === "normal" ? "streets" : "ruins"}`;
+    art.className = `map-art ${d.id}`;
     const meta = document.createElement("span");
     meta.className = "map-meta";
     const mode = document.createElement("span");
     mode.className = "map-mode";
-    mode.textContent = "상대 AI";
+    mode.textContent = d.id === "extreme" ? "경고" : "상대 AI";
     const name = document.createElement("span");
     name.className = "map-name";
     name.textContent = d.name;
@@ -326,6 +328,7 @@ function paintHud(h: HudSnap) {
   must("#ammo").textContent = h.ammo;
   must("#hint").textContent = h.hint;
   must("#crosshair").classList.toggle("hot", h.crosshairHot);
+  must("#hud").classList.toggle("infra", h.infra);
   must("#scope").classList.toggle("hidden", !h.scoped);
   if (h.scoped) {
     must("#charge-fill").style.height = `${Math.round(h.charge * 100)}%`;
@@ -425,7 +428,11 @@ function leaveMatch() {
   match = null;
   document.body.classList.remove("playing");
   must("#hud").classList.add("hidden");
+  must("#hud").classList.remove("infra");
+  must("#crosshair").classList.remove("hit", "head");
+  must("#dmg-layer").replaceChildren();
   window.clearTimeout(killMarkTimer);
+  window.clearTimeout(hitMarkTimer);
   const mark = must("#kill-mark");
   mark.classList.add("hidden");
   mark.classList.remove("show");
@@ -441,8 +448,23 @@ function enterMatch() {
   document.body.classList.add("playing");
   must("#hud").classList.remove("hidden");
   closeOverlay();
+  unlockSfx();
   match = new Match(canvas, selected, selectedMap, selectedDiff, selectedFormat);
   match.onHud = paintHud;
+  match.onHit = (hit) => {
+    const xhair = must("#crosshair");
+    window.clearTimeout(hitMarkTimer);
+    xhair.classList.add("hit");
+    xhair.classList.toggle("head", hit.head);
+    hitMarkTimer = window.setTimeout(() => xhair.classList.remove("hit", "head"), 120);
+    const n = document.createElement("div");
+    n.className = hit.head ? "dmg-num head" : "dmg-num";
+    n.textContent = String(hit.dmg);
+    n.style.left = `${hit.x}px`;
+    n.style.top = `${hit.y}px`;
+    must("#dmg-layer").append(n);
+    window.setTimeout(() => n.remove(), 720);
+  };
   match.onKill = (head) => {
     const mark = must("#kill-mark");
     window.clearTimeout(killMarkTimer);
