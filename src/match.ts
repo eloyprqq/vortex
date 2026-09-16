@@ -38,6 +38,10 @@ type Field = {
   healRate: number;
 };
 
+export type MatchFormat = "5v5" | "1v1";
+
+export const DUEL_KILLS = 5;
+
 export type HudSnap = {
   health: number;
   maxHealth: number;
@@ -69,6 +73,8 @@ export type HudSnap = {
   k: number;
   d: number;
   a: number;
+  duel: boolean;
+  enemyKills: number;
 };
 
 export class Match {
@@ -114,6 +120,7 @@ export class Match {
   private hpReveal = new Map<string, number>();
   private map: MapDef;
   private diff: Difficulty;
+  private duel = false;
   result: "win" | "lose" | "draw" | null = null;
   onHud: (s: HudSnap) => void = () => {};
   onPause: (p: boolean) => void = () => {};
@@ -125,9 +132,10 @@ export class Match {
   private pushCum: number[] = [];
   private botNav = new Map<string, { x: number; z: number; stuck: number; side: number; avoid: number }>();
 
-  constructor(canvas: HTMLCanvasElement, hero: HeroId, mapId: MapId, difficultyId: DifficultyId) {
+  constructor(canvas: HTMLCanvasElement, hero: HeroId, mapId: MapId, difficultyId: DifficultyId, format: MatchFormat = "5v5") {
     this.map = mapById(mapId);
     this.diff = difficultyById(difficultyId);
+    this.duel = format === "1v1";
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
@@ -159,16 +167,25 @@ export class Match {
     this.player = new Fighter("you", "ally", hero, this.map.allySpawns[0]);
     this.scene.add(this.player.group);
     this.fighters.push(this.player);
-    for (let i = 1; i < 5; i++) {
-      const id = allyMix[i] === hero ? otherHero(hero) : allyMix[i];
-      const f = new Fighter(`ally${i}`, "ally", id, this.map.allySpawns[i]);
-      this.scene.add(f.group);
-      this.fighters.push(f);
-    }
-    for (let i = 0; i < 5; i++) {
-      const f = new Fighter(`enemy${i}`, "enemy", enemyMix[i], this.map.enemySpawns[i]);
-      this.scene.add(f.group);
-      this.fighters.push(f);
+    if (this.duel) {
+      const all: HeroId[] = ["soldier76", "widowmaker", "nova"];
+      const pool = all.filter((id) => id !== hero);
+      const enemyHero = pool[Math.floor(Math.random() * pool.length)] ?? "soldier76";
+      const foe = new Fighter("enemy0", "enemy", enemyHero, this.map.enemySpawns[0]);
+      this.scene.add(foe.group);
+      this.fighters.push(foe);
+    } else {
+      for (let i = 1; i < 5; i++) {
+        const id = allyMix[i] === hero ? otherHero(hero) : allyMix[i];
+        const f = new Fighter(`ally${i}`, "ally", id, this.map.allySpawns[i]);
+        this.scene.add(f.group);
+        this.fighters.push(f);
+      }
+      for (let i = 0; i < 5; i++) {
+        const f = new Fighter(`enemy${i}`, "enemy", enemyMix[i], this.map.enemySpawns[i]);
+        this.scene.add(f.group);
+        this.fighters.push(f);
+      }
     }
 
     this.onResize = () => {
@@ -191,7 +208,7 @@ export class Match {
     this.buildViewField();
     this.buildViewGrapple();
 
-    if (this.map.kind === "push") {
+    if (!this.duel && this.map.kind === "push") {
       const body = new THREE.Mesh(
         new THREE.CylinderGeometry(0.7, 0.9, 1.6, 10),
         new THREE.MeshStandardMaterial({ color: 0xc8d0c0, metalness: 0.45, roughness: 0.4 }),
@@ -248,8 +265,10 @@ export class Match {
       this.tickPlayer(dt);
       this.tickBots(dt);
       this.tickWorld(dt);
-      if (this.map.kind === "push") this.tickPush(dt);
-      else this.tickCapture(dt);
+      if (!this.duel) {
+        if (this.map.kind === "push") this.tickPush(dt);
+        else this.tickCapture(dt);
+      }
       if (this.timeLeft <= 0) this.finishByTime();
     }
 
@@ -867,6 +886,9 @@ export class Match {
           text: `${heroById(src.heroId).name}  →  ${heroById(target.heroId).name}`,
         });
         if (src === this.player) this.onKill(headshot);
+        if (this.duel && src.kills >= DUEL_KILLS) {
+          this.endMatch(src === this.player ? "win" : "lose");
+        }
       }
       target.hits = [];
     }
@@ -1359,28 +1381,40 @@ export class Match {
           this.spawnHealZone(f);
         }
       } else if (foe) {
-        const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
         const d = f.group.position.distanceTo(foe.group.position);
-        f.scoped = onCap && d > 10 && this.canSee(f, foe);
-        if (f.team === "ally") {
-          const perch = this.map.allyPerch;
-          if (f.grappleCd <= 0 && f.group.position.y < 2.5 && Math.random() < 0.05) {
-            f.grappleCd = 12;
-            f.grappleT = 0.45;
-            f.grappleTo = perch.clone();
+        if (this.duel) {
+          f.scoped = d > 8 && this.canSee(f, foe);
+          if (f.fireCd <= 0 && this.canSee(f, foe) && Math.random() < this.bot(f).fireGate) {
+            this.lookAt(f, foe);
+            this.fireWidow(f);
           }
-        } else if (!onCap && f.grappleCd <= 0 && f.group.position.distanceTo(this.tmp.set(0, 0, 0)) > 14 && Math.random() < 0.08) {
-          this.faceToward(f, this.tmp.set(0, 0, 0));
-          this.grapple(f);
-        }
-        if (f.mineCd <= 0 && onCap) this.placeMine(f);
-        if (f.fireCd <= 0 && this.canSee(f, foe) && Math.random() < this.bot(f).fireGate) {
-          this.lookAt(f, foe);
-          this.fireWidow(f);
-        }
-        if (f.ult >= 100 && (f.team === "ally" || this.diff.enemyUlt)) {
-          f.ult = 0;
-          f.infraT = 12;
+          if (f.ult >= 100 && this.diff.enemyUlt) {
+            f.ult = 0;
+            f.infraT = 12;
+          }
+        } else {
+          const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
+          f.scoped = onCap && d > 10 && this.canSee(f, foe);
+          if (f.team === "ally") {
+            const perch = this.map.allyPerch;
+            if (f.grappleCd <= 0 && f.group.position.y < 2.5 && Math.random() < 0.05) {
+              f.grappleCd = 12;
+              f.grappleT = 0.45;
+              f.grappleTo = perch.clone();
+            }
+          } else if (!onCap && f.grappleCd <= 0 && f.group.position.distanceTo(this.tmp.set(0, 0, 0)) > 14 && Math.random() < 0.08) {
+            this.faceToward(f, this.tmp.set(0, 0, 0));
+            this.grapple(f);
+          }
+          if (f.mineCd <= 0 && onCap) this.placeMine(f);
+          if (f.fireCd <= 0 && this.canSee(f, foe) && Math.random() < this.bot(f).fireGate) {
+            this.lookAt(f, foe);
+            this.fireWidow(f);
+          }
+          if (f.ult >= 100 && (f.team === "ally" || this.diff.enemyUlt)) {
+            f.ult = 0;
+            f.infraT = 12;
+          }
         }
       }
     }
@@ -1405,6 +1439,15 @@ export class Match {
 
   private steerBot(f: Fighter) {
     const foe = this.nearestFoe(f);
+    if (this.duel) {
+      if (foe) {
+        this.setBotMove(f, foe.group.position.x, foe.group.position.z, 1.35);
+        f.sprinting = f.heroId === "soldier76";
+        if (this.canSee(f, foe)) this.lookAt(f, foe);
+        else this.faceToward(f, foe.group.position);
+      }
+      return;
+    }
     if (this.map.kind === "push") {
       const rx = this.robot.position.x;
       const rz = this.robot.position.z;
@@ -1595,6 +1638,14 @@ export class Match {
   }
 
   private finishByTime() {
+    if (this.duel) {
+      const foe = this.fighters.find((f) => f.team === "enemy");
+      const ek = foe?.kills ?? 0;
+      if (this.player.kills > ek) this.endMatch("win");
+      else if (this.player.kills < ek) this.endMatch("lose");
+      else this.endMatch("draw");
+      return;
+    }
     if (this.allyCap > this.enemyCap) this.endMatch("win");
     else if (this.enemyCap > this.allyCap) this.endMatch("lose");
     else this.endMatch("draw");
@@ -1630,15 +1681,17 @@ export class Match {
     });
     let ally = 0;
     let enemy = 0;
-    for (const f of this.fighters) {
-      if (!f.alive) continue;
-      if (this.map.kind === "push") {
-        const dx = f.group.position.x - this.robot.position.x;
-        const dz = f.group.position.z - this.robot.position.z;
-        if (dx * dx + dz * dz > PUSH_RADIUS * PUSH_RADIUS) continue;
-      } else if (!onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) continue;
-      if (f.team === "ally") ally += 1;
-      else enemy += 1;
+    if (!this.duel) {
+      for (const f of this.fighters) {
+        if (!f.alive) continue;
+        if (this.map.kind === "push") {
+          const dx = f.group.position.x - this.robot.position.x;
+          const dz = f.group.position.z - this.robot.position.z;
+          if (dx * dx + dz * dz > PUSH_RADIUS * PUSH_RADIUS) continue;
+        } else if (!onPoint(f.group.position.x, f.group.position.z, this.map.captureR)) continue;
+        if (f.team === "ally") ally += 1;
+        else enemy += 1;
+      }
     }
     this.ray.setFromCamera(this.ndc, this.camera);
     const hover = this.ray.intersectObjects(this.hitables(this.player), false)[0];
@@ -1667,8 +1720,9 @@ export class Match {
       sprint: p.sprinting,
       fly: p.flyT > 0,
       hero: p.heroId,
-      obj:
-        this.map.kind === "push"
+      obj: this.duel
+        ? `1v1 · ${DUEL_KILLS}킬 선승`
+        : this.map.kind === "push"
           ? ally && enemy
             ? "로봇 경합"
             : ally
@@ -1683,8 +1737,8 @@ export class Match {
               : enemy
                 ? "적 점령"
                 : "거점으로",
-      allyCap: this.allyCap,
-      enemyCap: this.enemyCap,
+      allyCap: this.duel ? (p.kills / DUEL_KILLS) * 100 : this.allyCap,
+      enemyCap: this.duel ? ((this.fighters.find((f) => f.team === "enemy")?.kills ?? 0) / DUEL_KILLS) * 100 : this.enemyCap,
       time: Math.max(0, this.timeLeft),
       contested: ally > 0 && enemy > 0,
       hint: p.alive
@@ -1701,6 +1755,8 @@ export class Match {
       k: p.kills,
       d: p.deaths,
       a: p.assists,
+      duel: this.duel,
+      enemyKills: this.fighters.find((f) => f.team === "enemy")?.kills ?? 0,
     });
   }
 }

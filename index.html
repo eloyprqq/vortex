@@ -17,11 +17,12 @@
       </header>
 
       <section id="screen-home" class="screen">
-        <p class="eyebrow">HERO SHOOTER / 5V5 BOTS</p>
+        <p class="eyebrow">HERO SHOOTER</p>
         <h1>VORTEX</h1>
-        <p class="lede">먼저 상대 난이도를 고른다. 그다음 맵, 히어로.</p>
+        <p class="lede">모드를 고른 뒤 난이도, 맵, 히어로.</p>
         <nav class="menu">
-          <button type="button" data-go="diff">플레이</button>
+          <button type="button" id="btn-5v5">5v5 봇전</button>
+          <button type="button" id="btn-1v1" class="ghost">1v1</button>
         </nav>
       </section>
 
@@ -120,6 +121,11 @@
           <span id="health-num"></span>
         </div>
         <div id="abils"></div>
+        <div id="ult-meter">
+          <div id="ult-ticks"></div>
+          <div id="ult-pct">0%</div>
+          <div id="ult-key">Q</div>
+        </div>
         <div id="ammo"></div>
       </div>
       <div id="hint"></div>

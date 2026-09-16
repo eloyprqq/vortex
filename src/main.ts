@@ -3,7 +3,7 @@ import { DIFFICULTIES, type DifficultyId } from "./difficulty";
 import { HEROES, type HeroId } from "./heroes";
 import { createLobbyBackdrop } from "./lobbyBackdrop";
 import { MAPS, mapById, type MapId } from "./maps";
-import { Match, type HudSnap } from "./match";
+import { DUEL_KILLS, Match, type HudSnap, type MatchFormat } from "./match";
 
 type Screen = "home" | "diff" | "maps" | "heroes";
 
@@ -19,6 +19,7 @@ let match: Match | null = null;
 let selected: HeroId = "soldier76";
 let selectedMap: MapId = "horizon";
 let selectedDiff: DifficultyId = "easy";
+let selectedFormat: MatchFormat = "5v5";
 let playerVote: MapId | null = null;
 const votes: Record<MapId, number> = { horizon: 0, streets: 0, ruins: 0 };
 let votePhase: "idle" | "voting" | "spin" | "done" = "idle";
@@ -48,9 +49,11 @@ function show(name: Screen) {
   if (name !== "maps") stopVoteTimers();
   if (name === "heroes") {
     const m = mapById(selectedMap);
-    must("#hero-map-copy").textContent = `${m.mode} · ${m.name}. 난이도 ${
-      DIFFICULTIES.find((d) => d.id === selectedDiff)?.name
-    }.`;
+    const diffName = DIFFICULTIES.find((d) => d.id === selectedDiff)?.name;
+    must("#hero-map-copy").textContent =
+      selectedFormat === "1v1"
+        ? `1v1 · ${DUEL_KILLS}킬 선승 · ${m.name} · ${diffName}`
+        : `${m.mode} · ${m.name}. 난이도 ${diffName}.`;
   }
 }
 
@@ -147,7 +150,7 @@ function startVote() {
     must("#vote-timer").textContent = `투표 ${Math.max(0, voteLeft).toFixed(1)}`;
     if (voteLeft <= 0) startSpin();
   }, 100);
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < (selectedFormat === "1v1" ? 1 : 9); i++) {
     const t = window.setTimeout(() => {
       if (votePhase !== "voting") return;
       const pick = MAPS[Math.floor(Math.random() * MAPS.length)].id;
@@ -315,8 +318,8 @@ function paintHud(h: HudSnap) {
   must("#clock").textContent = fmtTime(h.time);
   must("#ally-bar").style.width = `${h.allyCap}%`;
   must("#enemy-bar").style.width = `${h.enemyCap}%`;
-  must("#obj-label").textContent = h.obj;
-  must("#team-count").textContent = `${h.aliveAlly} vs ${h.aliveEnemy}`;
+  must("#obj-label").textContent = h.duel ? `${h.k} - ${h.enemyKills}` : h.obj;
+  must("#team-count").textContent = h.duel ? `1v1 · ${DUEL_KILLS}킬 선승` : `${h.aliveAlly} vs ${h.aliveEnemy}`;
   paintOwBar(must("#health-bar"), h.health, h.maxHealth);
   must("#health-num").textContent = `${Math.ceil(h.health)} / ${h.maxHealth}`;
   paintHpFloats(h.hpBars);
@@ -342,18 +345,15 @@ function paintHud(h: HudSnap) {
       ? [
           ["헬릭스", h.helix],
           ["생체장", h.field],
-          ["궁극기", h.visor ? 0 : (100 - h.ult) / 16.6],
         ]
       : h.hero === "nova"
         ? [
             ["비행", h.field],
             ["가속장", h.mine],
-            ["궁극기", (100 - h.ult) / 12],
           ]
         : [
             ["갈고리", h.grapple],
             ["지뢰", h.mine],
-            ["궁극기", h.infra ? 0 : (100 - h.ult) / 8.3],
           ];
   for (const [label, cd] of rows) {
     const el = document.createElement("div");
@@ -374,6 +374,30 @@ function paintHud(h: HudSnap) {
     el.className = "abil ready";
     el.textContent = "비행";
     abils.append(el);
+  }
+  paintUlt(h);
+}
+
+const ULT_TICKS = 40;
+
+function buildUltRing() {
+  const ring = must("#ult-ticks");
+  ring.replaceChildren();
+  for (let i = 0; i < ULT_TICKS; i++) {
+    const tick = document.createElement("i");
+    tick.style.transform = `rotate(${(i / ULT_TICKS) * 360}deg) translateY(-36px)`;
+    ring.append(tick);
+  }
+}
+
+function paintUlt(h: HudSnap) {
+  const pct = Math.max(0, Math.min(100, Math.round(h.ult)));
+  must("#ult-pct").textContent = `${pct}%`;
+  must("#ult-meter").classList.toggle("ready", pct >= 100);
+  const ticks = must("#ult-ticks").children;
+  const filled = Math.round((pct / 100) * ticks.length);
+  for (let i = 0; i < ticks.length; i++) {
+    ticks[i].classList.toggle("on", i < filled);
   }
 }
 
@@ -417,7 +441,7 @@ function enterMatch() {
   document.body.classList.add("playing");
   must("#hud").classList.remove("hidden");
   closeOverlay();
-  match = new Match(canvas, selected, selectedMap, selectedDiff);
+  match = new Match(canvas, selected, selectedMap, selectedDiff, selectedFormat);
   match.onHud = paintHud;
   match.onKill = (head) => {
     const mark = must("#kill-mark");
@@ -450,6 +474,14 @@ document.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((btn) => {
   });
 });
 
+must("#btn-5v5").addEventListener("click", () => {
+  selectedFormat = "5v5";
+  show("diff");
+});
+must("#btn-1v1").addEventListener("click", () => {
+  selectedFormat = "1v1";
+  show("diff");
+});
 must("#btn-after-vote").addEventListener("click", () => show("heroes"));
 must("#btn-enter").addEventListener("click", enterMatch);
 must("#btn-lobby").addEventListener("click", leaveMatch);
@@ -457,4 +489,5 @@ must("#btn-lobby").addEventListener("click", leaveMatch);
 renderDiff();
 renderMaps();
 renderRoster();
+buildUltRing();
 show("home");

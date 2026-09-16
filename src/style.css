@@ -404,6 +404,74 @@ body.playing #vignette {
   color: var(--accent);
 }
 
+#ult-meter {
+  position: relative;
+  width: 112px;
+  height: 128px;
+  flex-shrink: 0;
+}
+
+#ult-ticks {
+  position: absolute;
+  left: 50%;
+  top: 46px;
+  width: 0;
+  height: 0;
+}
+
+#ult-ticks i {
+  position: absolute;
+  left: -2.5px;
+  top: -6px;
+  width: 5px;
+  height: 12px;
+  border-radius: 1px;
+  background: #2c3038;
+  transform-origin: 2.5px 6px;
+}
+
+#ult-ticks i.on {
+  background: #d9a441;
+}
+
+#ult-meter.ready #ult-ticks i.on {
+  background: #e8c15a;
+}
+
+#ult-pct {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 32px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: #f2f4f7;
+}
+
+#ult-meter.ready #ult-pct {
+  color: #f5c518;
+}
+
+#ult-key {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border: 1px solid #5c6774;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c5ced6;
+  background: #14181f;
+}
+
 #ammo {
   min-width: 120px;
   text-align: right;
@@ -673,7 +741,7 @@ body.playing #vignette {
   position: absolute;
   left: 50%;
   top: auto;
-  bottom: 96px;
+  bottom: 150px;
   width: 48px;
   height: 48px;
   margin: 0 0 0 -24px;
