@@ -346,10 +346,9 @@ function paintHud(h: HudSnap) {
         ]
       : h.hero === "nova"
         ? [
-            ["은폐", h.field],
-            ["홀로그램", h.mine],
-            ["속박탄", h.helix],
-            ["궁극기", h.visor ? 0 : (100 - h.ult) / 12],
+            ["비행", h.field],
+            ["가속장", h.mine],
+            ["궁극기", (100 - h.ult) / 12],
           ]
         : [
             ["갈고리", h.grapple],
@@ -368,6 +367,12 @@ function paintHud(h: HudSnap) {
     const el = document.createElement("div");
     el.className = "abil ready";
     el.textContent = "질주";
+    abils.append(el);
+  }
+  if (h.fly) {
+    const el = document.createElement("div");
+    el.className = "abil ready";
+    el.textContent = "비행";
     abils.append(el);
   }
 }

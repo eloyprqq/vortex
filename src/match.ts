@@ -9,7 +9,7 @@ import {
   resolveMove,
   type Aabb,
 } from "./arena";
-import { Fighter, type Team } from "./fighter";
+import { Fighter } from "./fighter";
 import { heroById, otherHero, type HeroId } from "./heroes";
 import { Input } from "./input";
 import { difficultyById, type Difficulty, type DifficultyId } from "./difficulty";
@@ -33,13 +33,9 @@ type Field = {
   pos: THREE.Vector3;
   owner: Fighter;
   life: number;
-};
-
-type Decoy = {
-  mesh: THREE.Group;
-  vel: THREE.Vector3;
-  life: number;
-  team: Team;
+  kind: "heal" | "haste";
+  radius: number;
+  healRate: number;
 };
 
 export type HudSnap = {
@@ -56,6 +52,7 @@ export type HudSnap = {
   scoped: boolean;
   charge: number;
   sprint: boolean;
+  fly: boolean;
   hero: HeroId;
   obj: string;
   allyCap: number;
@@ -85,7 +82,6 @@ export class Match {
   private rockets: Rocket[] = [];
   private mines: Mine[] = [];
   private fields: Field[] = [];
-  private decoys: Decoy[] = [];
   private ray = new THREE.Raycaster();
   private ndc = new THREE.Vector2(0, 0);
   private wish = new THREE.Vector3();
@@ -104,12 +100,15 @@ export class Match {
   private botThink = 0;
   private worldHits: THREE.Object3D[] = [];
   private viewGun = new THREE.Group();
+  private viewGrip: THREE.Group | null = null;
+  private viewSupport: THREE.Group | null = null;
   private viewField = new THREE.Group();
   private viewGrapple = new THREE.Group();
   private viewScene = new THREE.Scene();
   private viewCamera: THREE.PerspectiveCamera;
-  private viewAct: "idle" | "field" | "grapple" = "idle";
+  private viewAct: "idle" | "field" | "grapple" | "reload" = "idle";
   private viewActT = 0;
+  private viewKick = 0;
   private fieldArmed = false;
   private grappleLine: THREE.Line | null = null;
   private hpReveal = new Map<string, number>();
@@ -299,6 +298,15 @@ export class Match {
     if (f.scoped) speed *= 0.55;
     if (f.cloakT > 0) speed *= 1.12;
     if (f.slowT > 0) speed *= 0.45;
+    for (const field of this.fields) {
+      if (field.kind !== "haste" || field.owner.team !== f.team) continue;
+      const hx = f.group.position.x - field.pos.x;
+      const hz = f.group.position.z - field.pos.z;
+      if (hx * hx + hz * hz < field.radius * field.radius) {
+        speed *= 1.5;
+        break;
+      }
+    }
 
     if (f.grappleT > 0 && f.grappleTo) {
       f.grappleT -= dt;
@@ -306,36 +314,67 @@ export class Match {
       f.vel.set(0, 0, 0);
       if (f.grappleT <= 0) f.grappleTo = null;
     } else {
-      this.wish.set(0, 0, 0);
-      if (isPlayer) {
-        if (this.input.keys.has("KeyW")) this.wish.z -= 1;
-        if (this.input.keys.has("KeyS")) this.wish.z += 1;
-        if (this.input.keys.has("KeyA")) this.wish.x -= 1;
-        if (this.input.keys.has("KeyD")) this.wish.x += 1;
-        if (this.wish.lengthSq() > 0) {
-          this.wish.normalize();
-          const cs = Math.cos(f.yaw);
-          const sn = Math.sin(f.yaw);
-          f.vel.x = (this.wish.x * cs + this.wish.z * sn) * speed;
-          f.vel.z = (this.wish.z * cs - this.wish.x * sn) * speed;
+      const flying = f.flyT > 0;
+      if (flying && isPlayer) {
+        const flySp = speed * 1.28;
+        f.lookDir(this.tmp);
+        f.vel.set(0, 0, 0);
+        if (this.input.keys.has("KeyW")) f.vel.addScaledVector(this.tmp, flySp);
+        if (this.input.keys.has("KeyS")) f.vel.addScaledVector(this.tmp, -flySp);
+        const rx = Math.cos(f.yaw);
+        const rz = -Math.sin(f.yaw);
+        if (this.input.keys.has("KeyD")) {
+          f.vel.x += rx * flySp;
+          f.vel.z += rz * flySp;
+        }
+        if (this.input.keys.has("KeyA")) {
+          f.vel.x -= rx * flySp;
+          f.vel.z -= rz * flySp;
+        }
+        if (this.input.keys.has("Space")) f.vel.y += flySp;
+        if (this.input.keys.has("ControlLeft") || this.input.keys.has("ControlRight")) f.vel.y -= flySp;
+      } else {
+        this.wish.set(0, 0, 0);
+        if (isPlayer) {
+          if (this.input.keys.has("KeyW")) this.wish.z -= 1;
+          if (this.input.keys.has("KeyS")) this.wish.z += 1;
+          if (this.input.keys.has("KeyA")) this.wish.x -= 1;
+          if (this.input.keys.has("KeyD")) this.wish.x += 1;
+          if (this.wish.lengthSq() > 0) {
+            this.wish.normalize();
+            const cs = Math.cos(f.yaw);
+            const sn = Math.sin(f.yaw);
+            f.vel.x = (this.wish.x * cs + this.wish.z * sn) * speed;
+            f.vel.z = (this.wish.z * cs - this.wish.x * sn) * speed;
+          } else {
+            f.vel.x *= 1 - Math.min(1, dt * 12);
+            f.vel.z *= 1 - Math.min(1, dt * 12);
+          }
+        } else if (f.botMoveX !== 0 || f.botMoveZ !== 0) {
+          this.tmp.set(f.botMoveX, 0, f.botMoveZ);
+          if (this.tmp.lengthSq() > 1) this.tmp.normalize();
+          f.vel.x = this.tmp.x * speed;
+          f.vel.z = this.tmp.z * speed;
         } else {
           f.vel.x *= 1 - Math.min(1, dt * 12);
           f.vel.z *= 1 - Math.min(1, dt * 12);
         }
-      } else if (f.botMoveX !== 0 || f.botMoveZ !== 0) {
-        this.tmp.set(f.botMoveX, 0, f.botMoveZ);
-        if (this.tmp.lengthSq() > 1) this.tmp.normalize();
-        f.vel.x = this.tmp.x * speed;
-        f.vel.z = this.tmp.z * speed;
-      } else {
-        f.vel.x *= 1 - Math.min(1, dt * 12);
-        f.vel.z *= 1 - Math.min(1, dt * 12);
+        if (flying) {
+          f.vel.y = THREE.MathUtils.clamp((3.8 - f.group.position.y) * 2.4, -5, 6);
+        } else if (isPlayer && this.input.keys.has("Space") && f.grounded) {
+          f.vel.y = 8.2;
+          f.grounded = false;
+        }
       }
-      if (isPlayer && this.input.keys.has("Space") && f.grounded) {
-        f.vel.y = 8.2;
-        f.grounded = false;
+      f.grounded = resolveMove(f.group.position, f.vel, f.radius, f.height, this.colliders, dt, this.map.bound, !flying);
+      if (flying) {
+        f.group.position.y = THREE.MathUtils.clamp(f.group.position.y, 0, 11);
+        if (f.group.position.y <= 0) {
+          f.group.position.y = 0;
+          f.vel.y = Math.max(0, f.vel.y);
+          f.grounded = true;
+        }
       }
-      f.grounded = resolveMove(f.group.position, f.vel, f.radius, f.height, this.colliders, dt, this.map.bound);
     }
 
     f.group.rotation.y = f.yaw;
@@ -356,6 +395,8 @@ export class Match {
     f.infraT = Math.max(0, f.infraT - dt);
     f.slowT = Math.max(0, f.slowT - dt);
     f.cloakT = Math.max(0, f.cloakT - dt);
+    f.flyT = Math.max(0, f.flyT - dt);
+    f.burstGap = Math.max(0, f.burstGap - dt);
     this.applyCloak(f);
     if (f.reload > 0) {
       f.reload -= dt;
@@ -366,11 +407,11 @@ export class Match {
       this.hurt(f, 12 * dt, f, false);
     }
     for (const field of this.fields) {
-      if (field.owner.team !== f.team) continue;
+      if (field.owner.team !== f.team || field.healRate <= 0) continue;
       const dx = f.group.position.x - field.pos.x;
       const dz = f.group.position.z - field.pos.z;
-      if (dx * dx + dz * dz < 16) {
-        f.health = Math.min(f.maxHealth, f.health + 40 * dt);
+      if (dx * dx + dz * dz < field.radius * field.radius) {
+        f.health = Math.min(f.maxHealth, f.health + field.healRate * dt);
       }
     }
   }
@@ -378,7 +419,7 @@ export class Match {
   private tickSoldier(f: Fighter, _dt: number, isPlayer: boolean) {
     if (isPlayer && this.viewAct !== "idle") return;
     if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) {
-      f.reload = 1.5;
+      this.beginReload(f, 1.5);
     }
     if (isPlayer && this.input.rmbDown && f.helixCd <= 0) this.fireHelix(f);
     if (isPlayer && this.input.keys.has("KeyE") && f.fieldCd <= 0) this.dropField(f);
@@ -408,7 +449,7 @@ export class Match {
       f.ult = 0;
       f.infraT = 12;
     }
-    if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) f.reload = 1.4;
+    if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) this.beginReload(f, 1.4);
 
     if (isPlayer) {
       if (f.scoped && this.input.lmbDown) this.fireWidow(f);
@@ -419,7 +460,7 @@ export class Match {
   private firePulse(f: Fighter) {
     if (f.fireCd > 0 || f.reload > 0) return;
     if (f.ammo <= 0) {
-      f.reload = 1.5;
+      this.beginReload(f, 1.5);
       return;
     }
     f.ammo -= 1;
@@ -427,12 +468,13 @@ export class Match {
     f.fireCd = (f.visorT > 0 ? 0.09 : 0.11) / botMul;
     const spread = (f.visorT > 0 && f === this.player ? 0 : 0.018) + (f === this.player ? 0 : this.bot(f).spread);
     this.hitscan(f, 19, 1, spread, 55);
+    this.kickView(f, 0.048);
   }
 
   private fireWidow(f: Fighter) {
     if (f.fireCd > 0 || f.reload > 0) return;
     if (f.ammo <= 0) {
-      f.reload = 1.4;
+      this.beginReload(f, 1.4);
       return;
     }
     f.ammo -= 1;
@@ -442,90 +484,77 @@ export class Match {
       const dmg = 12 + 108 * f.charge;
       this.hitscan(f, dmg, 2.5, 0.02 + extra * 0.6, 80);
       f.charge = 0;
+      this.kickView(f, 0.1);
     } else {
       f.fireCd = 0.12 / (f === this.player ? 1 : this.bot(f).fire);
       this.hitscan(f, 13, 1, 0.03 + extra, 40);
+      this.kickView(f, 0.055);
     }
   }
 
   private tickNova(f: Fighter, _dt: number, isPlayer: boolean) {
     if (isPlayer && this.viewAct !== "idle") return;
-    if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) f.reload = 1.35;
-    if (isPlayer && (this.input.keys.has("ShiftLeft") || this.input.keys.has("ShiftRight")) && f.fieldCd <= 0) {
-      f.fieldCd = 12;
-      f.cloakT = 6;
+    if (isPlayer && this.input.keys.has("KeyR") && f.reload <= 0 && f.ammo < f.maxAmmo) {
+      this.beginReload(f, 1.45);
     }
-    if (isPlayer && this.input.keys.has("KeyE") && f.mineCd <= 0) this.spawnDecoy(f);
-    if (isPlayer && this.input.rmbDown && f.helixCd <= 0) this.firePin(f);
+    if (f.reload > 0) return;
+    if (isPlayer && (this.input.keys.has("ShiftLeft") || this.input.keys.has("ShiftRight")) && f.fieldCd <= 0) {
+      f.fieldCd = 10;
+      f.flyT = 4;
+    }
+    if (f.flyT > 0 && ((isPlayer && this.input.keys.has("KeyE")) || !isPlayer) && f.mineCd <= 0) {
+      this.spawnHastePad(f);
+    }
     if (isPlayer && this.input.keys.has("KeyQ") && f.ult >= 100) {
       f.ult = 0;
-      f.visorT = 1.6;
+      this.spawnHealZone(f);
     }
-    if (f.visorT > 0) {
-      if (isPlayer) this.assistAim(f);
-      if (f.fireCd <= 0) this.fireNova(f, 82, 0.012);
+    if (f.burstLeft > 0) {
+      this.tickNovaBurst(f);
       return;
     }
     const shoot = isPlayer
-      ? this.input.lmb
+      ? this.input.lmbDown
       : f.fireCd <= 0 && Math.random() < this.bot(f).fireGate;
-    if (shoot) this.fireNova(f, 36, isPlayer ? 0.01 : 0.028);
+    if (shoot) this.startNovaBurst(f);
   }
 
-  private fireNova(f: Fighter, dmg: number, spread: number) {
-    if (f.fireCd > 0 || f.reload > 0) return;
+  private startNovaBurst(f: Fighter) {
+    if (f.fireCd > 0 || f.reload > 0 || f.burstLeft > 0) return;
     if (f.ammo <= 0) {
-      f.reload = 1.35;
+      this.beginReload(f, 1.45);
+      return;
+    }
+    f.burstLeft = Math.min(10, f.ammo);
+    f.burstGap = 0;
+    this.fireNovaPellet(f);
+  }
+
+  private tickNovaBurst(f: Fighter) {
+    if (f.reload > 0) {
+      f.burstLeft = 0;
+      return;
+    }
+    if (f.burstGap > 0) return;
+    this.fireNovaPellet(f);
+  }
+
+  private fireNovaPellet(f: Fighter) {
+    if (f.reload > 0 || f.ammo <= 0) {
+      f.burstLeft = 0;
+      if (f.ammo <= 0) this.beginReload(f, 1.45);
       return;
     }
     f.ammo -= 1;
-    f.cloakT = 0;
-    const botMul = f === this.player ? 1 : this.bot(f).fire;
-    f.fireCd = (f.visorT > 0 ? 0.38 : 0.32) / botMul;
-    this.hitscan(f, dmg, 2.2, spread + (f === this.player ? 0 : this.bot(f).spread), 70);
-  }
-
-  private firePin(f: Fighter) {
-    f.helixCd = 8;
-    f.cloakT = 0;
-    this.aimRay(f, f === this.player ? 0.008 : this.bot(f).spread);
-    const hits = this.ray.intersectObjects(this.hitables(f), false);
-    const first = hits.find((h) => h.distance <= 45);
-    if (!first) {
-      this.tracer(this.ray.ray.origin, this.ray.ray.direction, 22, 0x4ecdc4);
-      return;
+    f.burstLeft = Math.max(0, f.burstLeft - 1);
+    f.burstGap = 0.042;
+    if (f.burstLeft <= 0) {
+      const botMul = f === this.player ? 1 : this.bot(f).fire;
+      f.fireCd = (f === this.player ? 0.2 : 0.55) / botMul;
     }
-    this.tracer(this.ray.ray.origin, this.ray.ray.direction, first.distance, 0x4ecdc4);
-    const target = first.object.userData.hit as Fighter | undefined;
-    if (!target || !target.alive || target.team === f.team) return;
-    this.hurt(target, 40, f, true, first.object.userData.part === "head");
-    if (target.alive) target.slowT = Math.max(target.slowT, 2.2);
-  }
-
-  private spawnDecoy(f: Fighter) {
-    f.mineCd = 12;
-    const mesh = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.32, 1.12, 6, 10),
-      new THREE.MeshStandardMaterial({
-        color: 0x1c2e38,
-        transparent: true,
-        opacity: 0.7,
-        emissive: 0x4ecdc4,
-        emissiveIntensity: 0.35,
-      }),
-    );
-    body.position.y = 0.85;
-    mesh.add(body);
-    mesh.position.copy(f.group.position);
-    f.lookDir(this.tmp);
-    this.scene.add(mesh);
-    this.decoys.push({
-      mesh,
-      vel: this.tmp.clone().setY(0).normalize().multiplyScalar(4.2),
-      life: 4,
-      team: f.team,
-    });
+    const spread = (f === this.player ? 0.016 : 0.03) + (f === this.player ? 0 : this.bot(f).spread);
+    this.hitscan(f, 8, 1.7, spread, 42);
+    this.kickView(f, 0.036);
   }
 
   private applyCloak(f: Fighter) {
@@ -626,7 +655,52 @@ export class Match {
     pos.y += 0.05;
     mesh.position.copy(pos);
     this.scene.add(mesh);
-    this.fields.push({ mesh, pos, owner: f, life: 5 });
+    this.fields.push({ mesh, pos, owner: f, life: 5, kind: "heal", radius: 4, healRate: 40 });
+  }
+
+  private spawnHastePad(f: Fighter) {
+    f.mineCd = 10;
+    const radius = 4;
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, 0.08, 28, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4ecdc4, transparent: true, opacity: 0.42, side: THREE.DoubleSide }),
+    );
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(radius * 0.92, 28),
+      new THREE.MeshBasicMaterial({ color: 0x2ec4b6, transparent: true, opacity: 0.22, side: THREE.DoubleSide }),
+    );
+    disc.rotation.x = -Math.PI / 2;
+    mesh.add(disc);
+    const pos = f.group.position.clone();
+    pos.y = 0.06;
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    this.fields.push({ mesh, pos, owner: f, life: 8, kind: "haste", radius, healRate: 0 });
+  }
+
+  private spawnHealZone(f: Fighter) {
+    const radius = 5;
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, 0.1, 32, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x86efac, transparent: true, opacity: 0.42, side: THREE.DoubleSide }),
+    );
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(radius * 0.94, 32),
+      new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.2, side: THREE.DoubleSide }),
+    );
+    disc.rotation.x = -Math.PI / 2;
+    mesh.add(disc);
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.2, 0.28, 10),
+      new THREE.MeshStandardMaterial({ color: 0x6ee7a8, emissive: 0x22c55e, emissiveIntensity: 0.55 }),
+    );
+    core.position.y = 0.18;
+    mesh.add(core);
+    const pos = f.group.position.clone();
+    pos.y = 0.06;
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    this.fields.push({ mesh, pos, owner: f, life: 15, kind: "heal", radius, healRate: 22 });
   }
 
   private grapple(f: Fighter) {
@@ -721,17 +795,6 @@ export class Match {
           this.mines.splice(i, 1);
           break;
         }
-      }
-    }
-
-    for (let i = this.decoys.length - 1; i >= 0; i--) {
-      const d = this.decoys[i];
-      d.life -= dt;
-      d.mesh.position.x += d.vel.x * dt;
-      d.mesh.position.z += d.vel.z * dt;
-      if (d.life <= 0) {
-        this.scene.remove(d.mesh);
-        this.decoys.splice(i, 1);
       }
     }
 
@@ -849,16 +912,21 @@ export class Match {
       return m;
     };
 
-    const receiver = hero === "widowmaker" || hero === "nova" ? 0.42 : 0.4;
+    const receiver = hero === "widowmaker" ? 0.42 : 0.4;
     box(0.09, 0.13, receiver, dark, 0, 0, 0.06);
     box(0.075, 0.1, 0.16, dark, 0, -0.02, 0.32);
 
-    if (hero === "widowmaker" || hero === "nova") {
+    if (hero === "widowmaker") {
       box(0.045, 0.045, 0.78, metal, 0, 0.01, -0.62);
       box(0.05, 0.05, 0.28, trim, 0, 0.12, -0.04);
       box(0.02, 0.06, 0.02, metal, 0, 0.09, 0.06);
       box(0.02, 0.06, 0.02, metal, 0, 0.09, -0.14);
       box(0.06, 0.05, 0.12, dark, 0, -0.02, -1.03);
+    } else if (hero === "nova") {
+      box(0.05, 0.05, 0.48, metal, 0, 0.012, -0.4);
+      box(0.055, 0.06, 0.22, trim, 0, 0.08, -0.04);
+      box(0.07, 0.2, 0.14, dark, 0, -0.16, 0.04);
+      box(0.04, 0.04, 0.1, dark, 0, 0.01, -0.68);
     } else {
       box(0.06, 0.06, 0.42, metal, 0, 0.012, -0.42);
       box(0.08, 0.08, 0.08, dark, 0, 0.012, -0.66);
@@ -872,11 +940,13 @@ export class Match {
     grip.position.set(-0.02, -0.16, 0.2);
     grip.rotation.set(0.62, 0.22, 0.2);
     this.viewGun.add(grip);
+    this.viewGrip = grip;
 
     const support = this.makeHand(glove, -1);
     support.position.set(-0.02, -0.075, -0.36);
     support.rotation.set(0.28, 0.1, -0.16);
     this.viewGun.add(support);
+    this.viewSupport = support;
 
     this.viewGun.traverse((o) => {
       o.frustumCulled = false;
@@ -972,20 +1042,53 @@ export class Match {
     this.viewScene.add(this.viewGrapple);
   }
 
+  private restHands() {
+    if (this.viewGrip) {
+      this.viewGrip.position.set(-0.02, -0.16, 0.2);
+      this.viewGrip.rotation.set(0.62, 0.22, 0.2);
+    }
+    if (this.viewSupport) {
+      this.viewSupport.position.set(-0.02, -0.075, -0.36);
+      this.viewSupport.rotation.set(0.28, 0.1, -0.16);
+    }
+  }
+
   private restGun() {
+    this.restHands();
     this.viewGun.scale.setScalar(0.62);
-    this.viewGun.position.set(0.27, -0.25, -0.7);
-    this.viewGun.rotation.set(0.05, 0.2, 0.04);
+    const kick = this.viewKick;
+    this.viewGun.position.set(0.27, -0.25 + kick * 0.28, -0.7 + kick * 0.12);
+    this.viewGun.rotation.set(0.05 + kick, 0.2, 0.04 - kick * 0.08);
+  }
+
+  private kickView(f: Fighter, amount: number) {
+    if (f !== this.player) return;
+    this.viewKick = Math.min(0.24, this.viewKick + amount);
+  }
+
+  private beginReload(f: Fighter, duration: number) {
+    if (f.reload > 0) return;
+    f.reload = duration;
+    f.burstLeft = 0;
+    if (f === this.player && this.viewAct === "idle") {
+      this.viewAct = "reload";
+      this.viewActT = 0;
+    }
   }
 
   private updateViewHands(dt: number) {
     const p = this.player;
+    this.viewKick *= Math.max(0, 1 - dt * 9);
     const scoped = p.alive && p.heroId === "widowmaker" && p.scoped;
     if (!p.alive || (scoped && this.viewAct !== "grapple")) {
       this.viewGun.visible = false;
       this.viewField.visible = false;
       this.viewGrapple.visible = false;
-      if (!p.alive) this.clearGrappleLine();
+      if (!p.alive) {
+        this.clearGrappleLine();
+        this.viewAct = "idle";
+        this.viewKick = 0;
+      }
       return;
     }
 
@@ -1002,6 +1105,14 @@ export class Match {
       if (this.viewActT >= 0.52) {
         this.viewAct = "idle";
         this.viewActT = 0;
+      }
+    } else if (this.viewAct === "reload") {
+      this.viewActT += dt;
+      this.poseReload();
+      if (p.reload <= 0) {
+        this.viewAct = "idle";
+        this.viewActT = 0;
+        this.restGun();
       }
     } else {
       this.viewGun.visible = true;
@@ -1046,6 +1157,79 @@ export class Match {
     const punch = t < 0.1 ? t / 0.1 : Math.max(0, 1 - (t - 0.1) / 0.28);
     this.viewGrapple.position.set(-0.3 + punch * 0.14, -0.24 + punch * 0.22, -0.22 - punch * 0.5);
     this.viewGrapple.rotation.set(-1.05 * punch, 0.45, -0.55);
+  }
+
+  private poseReload() {
+    const p = this.player;
+    const dur = this.viewActT + Math.max(0, p.reload);
+    const t = dur > 0.001 ? THREE.MathUtils.clamp(this.viewActT / dur, 0, 1) : 1;
+    this.viewGun.visible = true;
+    this.viewField.visible = false;
+    this.viewGrapple.visible = false;
+    this.viewGun.scale.setScalar(0.62);
+
+    let gunY = -0.25;
+    let gunRx = 0.05;
+    let gunRz = 0.04;
+    let supportX = -0.02;
+    let supportY = -0.075;
+    let supportZ = -0.36;
+    let supportRx = 0.28;
+    let gripZ = 0.2;
+    let gripRx = 0.62;
+
+    if (t < 0.22) {
+      const k = t / 0.22;
+      gunY = -0.25 - k * 0.14;
+      gunRx = 0.05 + k * 0.58;
+      gunRz = 0.04 + k * 0.28;
+      supportY = -0.075 - k * 0.2;
+      supportRx = 0.28 + k * 0.7;
+      gripRx = 0.62 + k * 0.28;
+    } else if (t < 0.52) {
+      const k = (t - 0.22) / 0.3;
+      gunY = -0.39;
+      gunRx = 0.63;
+      gunRz = 0.32;
+      supportX = -0.02 - k * 0.1;
+      supportY = -0.275 - Math.sin(k * Math.PI) * 0.16;
+      supportZ = -0.36 + k * 0.14;
+      supportRx = 0.98 + k * 0.45;
+      gripRx = 0.9;
+    } else if (t < 0.74) {
+      const k = (t - 0.52) / 0.22;
+      gunY = -0.39 + k * 0.08;
+      gunRx = 0.63 - k * 0.18;
+      gunRz = 0.32 - k * 0.12;
+      supportX = -0.12 + k * 0.1;
+      supportY = -0.275 + k * 0.2;
+      supportZ = -0.22 - k * 0.14;
+      supportRx = 1.43 - k * 1.15;
+      gripRx = 0.9 - k * 0.18;
+    } else {
+      const k = (t - 0.74) / 0.26;
+      const rack = Math.sin(k * Math.PI);
+      gunY = -0.31 + k * 0.06;
+      gunRx = 0.45 - k * 0.4 + rack * 0.14;
+      gunRz = 0.2 * (1 - k);
+      supportY = -0.075;
+      supportX = -0.02;
+      supportZ = -0.36;
+      supportRx = 0.28;
+      gripRx = 0.62;
+      gripZ = 0.2 - rack * 0.06;
+    }
+
+    this.viewGun.position.set(0.27, gunY, -0.7);
+    this.viewGun.rotation.set(gunRx, 0.2, gunRz);
+    if (this.viewSupport) {
+      this.viewSupport.position.set(supportX, supportY, supportZ);
+      this.viewSupport.rotation.set(supportRx, 0.1 + (t < 0.52 ? 0.25 : 0), -0.16);
+    }
+    if (this.viewGrip) {
+      this.viewGrip.position.set(-0.02, -0.16, gripZ);
+      this.viewGrip.rotation.set(gripRx, 0.22, 0.2);
+    }
   }
 
   private updateGrappleLine() {
@@ -1166,22 +1350,13 @@ export class Match {
           f.visorT = 6;
         }
       } else if (f.heroId === "nova") {
-        if (f.fieldCd <= 0 && foe && f.group.position.distanceTo(foe.group.position) < 14 && Math.random() < 0.08) {
-          f.fieldCd = 12;
-          f.cloakT = 6;
+        if (f.fieldCd <= 0 && foe && f.group.position.distanceTo(foe.group.position) < 16 && Math.random() < 0.08) {
+          f.fieldCd = 10;
+          f.flyT = 4;
         }
-        if (f.mineCd <= 0 && Math.random() < 0.04) this.spawnDecoy(f);
-        if (foe && f.helixCd <= 0 && this.canSee(f, foe) && Math.random() < 0.12) {
-          this.lookAt(f, foe);
-          this.firePin(f);
-        }
-        if (foe && f.fireCd <= 0 && this.canSee(f, foe) && Math.random() < this.bot(f).fireGate) {
-          this.lookAt(f, foe);
-          this.fireNova(f, 36, 0.03);
-        }
-        if (f.ult >= 100 && foe && (f.team === "ally" || this.diff.enemyUlt)) {
+        if (f.ult >= 100 && (f.health < f.maxHealth * 0.7 || foe) && (f.team === "ally" || this.diff.enemyUlt)) {
           f.ult = 0;
-          f.visorT = 1.6;
+          this.spawnHealZone(f);
         }
       } else if (foe) {
         const onCap = onPoint(f.group.position.x, f.group.position.z, this.map.captureR);
@@ -1490,6 +1665,7 @@ export class Match {
       scoped: p.scoped,
       charge: p.charge,
       sprint: p.sprinting,
+      fly: p.flyT > 0,
       hero: p.heroId,
       obj:
         this.map.kind === "push"

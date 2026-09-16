@@ -164,8 +164,9 @@ export function resolveMove(
   colliders: Aabb[],
   dt: number,
   bound: number,
+  gravity = true,
 ): boolean {
-  vel.y -= 22 * dt;
+  if (gravity) vel.y -= 22 * dt;
   pos.x += vel.x * dt;
   pos.z += vel.z * dt;
   pos.y += vel.y * dt;

@@ -34,6 +34,9 @@ export class Fighter {
   charge = 0;
   poisonT = 0;
   cloakT = 0;
+  flyT = 0;
+  burstLeft = 0;
+  burstGap = 0;
   slowT = 0;
   alive = true;
   respawn = 0;
@@ -69,8 +72,8 @@ export class Fighter {
       this.maxAmmo = 25;
       this.ammo = 25;
     } else if (this.heroId === "nova") {
-      this.maxAmmo = 12;
-      this.ammo = 12;
+      this.maxAmmo = 120;
+      this.ammo = 120;
     } else {
       this.maxAmmo = 35;
       this.ammo = 35;
@@ -85,6 +88,9 @@ export class Fighter {
     this.sprinting = false;
     this.scoped = false;
     this.charge = 0;
+    this.flyT = 0;
+    this.burstLeft = 0;
+    this.burstGap = 0;
     this.botMoveX = 0;
     this.botMoveZ = 0;
   }
@@ -98,6 +104,9 @@ export class Fighter {
     this.alive = true;
     this.poisonT = 0;
     this.cloakT = 0;
+    this.flyT = 0;
+    this.burstLeft = 0;
+    this.burstGap = 0;
     this.slowT = 0;
     this.healT = 0;
     this.grappleT = 0;
@@ -271,17 +280,22 @@ export class Fighter {
     this.group.add(visor);
     const rifle = new THREE.Group();
     const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.032, 0.028, 1.45, 8),
+      new THREE.CylinderGeometry(0.03, 0.026, 0.82, 8),
       new THREE.MeshStandardMaterial({ color: 0x12181c, metalness: 0.65, roughness: 0.28 }),
     );
     barrel.rotation.x = Math.PI / 2;
+    const mag = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.2, 0.14),
+      new THREE.MeshStandardMaterial({ color: 0x0c1216 }),
+    );
+    mag.position.set(0, -0.14, 0.06);
     const rail = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.04, 0.5),
+      new THREE.BoxGeometry(0.05, 0.04, 0.32),
       new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.35 }),
     );
-    rail.position.set(0, 0.06, -0.1);
-    rifle.add(barrel, rail);
-    rifle.position.set(0.36, 1.12, -0.48);
+    rail.position.set(0, 0.06, -0.08);
+    rifle.add(barrel, mag, rail);
+    rifle.position.set(0.38, 1.05, -0.28);
     this.group.add(rifle);
   }
 }
