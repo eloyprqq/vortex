@@ -10,23 +10,37 @@
     <div id="vignette"></div>
 
     <div id="app">
-      <header class="topbar">
-        <span class="mark">VX</span>
-        <span class="product">VORTEX</span>
-        <span class="phase">태초마을 · 로비</span>
+      <header class="ow-chrome">
+        <div class="ow-brand">
+          <span class="mark">VX</span>
+          <span class="product">VORTEX</span>
+        </div>
+        <nav class="ow-tabs" aria-label="모드">
+          <button type="button" class="ow-tab on" id="tab-5v5">5v5</button>
+          <button type="button" class="ow-tab" id="tab-1v1">1v1</button>
+        </nav>
       </header>
 
-      <section id="screen-home" class="screen">
-        <p class="eyebrow">HERO SHOOTER</p>
-        <h1>VORTEX</h1>
-        <p class="lede">모드를 고른 뒤 난이도, 맵, 히어로.</p>
-        <nav class="menu">
-          <button type="button" id="btn-5v5">5v5 봇전</button>
-          <button type="button" id="btn-1v1" class="ghost">1v1</button>
-        </nav>
+      <section id="screen-home" class="screen screen-play">
+        <div class="play-copy">
+          <p class="play-kicker" id="play-kicker">봇전</p>
+          <h1 id="play-title">5V5</h1>
+          <p class="play-lede" id="play-lede">아군 봇 4명과 적 봇 5명.</p>
+        </div>
+        <aside class="squad-panel">
+          <div class="squad-head">
+            <span>스쿼드</span>
+            <span id="squad-count">1 / 6</span>
+          </div>
+          <div id="squad-list"></div>
+        </aside>
+        <footer class="play-bar">
+          <span class="play-hint">히어로는 맵 고른 뒤 고른다</span>
+          <button type="button" id="btn-play">플레이</button>
+        </footer>
       </section>
 
-      <section id="screen-diff" class="screen hidden">
+      <section id="screen-diff" class="screen screen-sheet hidden">
         <p class="eyebrow">SKILL TIER</p>
         <h2>난이도</h2>
         <p class="lede">상대 봇 세기. 익스트림은 조준만 더 정확하다.</p>
@@ -37,7 +51,7 @@
         </nav>
       </section>
 
-      <section id="screen-maps" class="screen hidden">
+      <section id="screen-maps" class="screen screen-sheet hidden">
         <p class="eyebrow">CONTROL</p>
         <h2>맵 선택</h2>
         <p class="lede" id="vote-copy">맵에 표를 넣는다. 봇도 표를 넣고, 표끼리 추첨한다.</p>
@@ -53,7 +67,7 @@
         </nav>
       </section>
 
-      <section id="screen-heroes" class="screen hidden">
+      <section id="screen-heroes" class="screen screen-sheet hidden">
         <p class="eyebrow">ASSEMBLE YOUR TEAM</p>
         <h2>히어로</h2>
         <p class="lede" id="hero-map-copy">아군 봇 4명이 같이 스폰한다.</p>

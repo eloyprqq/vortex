@@ -43,6 +43,41 @@ function must<T extends HTMLElement = HTMLElement>(sel: string): T {
   return el;
 }
 
+function setFormat(fmt: MatchFormat) {
+  selectedFormat = fmt;
+  must("#tab-5v5").classList.toggle("on", fmt === "5v5");
+  must("#tab-1v1").classList.toggle("on", fmt === "1v1");
+  must("#play-title").textContent = fmt === "1v1" ? "1V1" : "5V5";
+  must("#play-lede").textContent =
+    fmt === "1v1" ? `${DUEL_KILLS}킬 선승. 적 봇 한 명.` : "아군 봇 4명과 적 봇 5명.";
+  must("#squad-count").textContent = fmt === "1v1" ? "1 / 2" : "1 / 6";
+  renderSquad();
+}
+
+function renderSquad() {
+  const n = selectedFormat === "1v1" ? 2 : 6;
+  const list = must("#squad-list");
+  list.replaceChildren();
+  for (let i = 0; i < n; i++) {
+    const row = document.createElement("div");
+    row.className = i === 0 ? "squad-slot you" : "squad-slot empty";
+    if (i === 0) {
+      const tag = document.createElement("span");
+      tag.className = "squad-tag";
+      tag.textContent = "YOU";
+      const name = document.createElement("span");
+      name.textContent = "PLAYER";
+      row.append(tag, name);
+    } else {
+      const plus = document.createElement("span");
+      plus.className = "squad-plus";
+      plus.textContent = "+";
+      row.append(plus);
+    }
+    list.append(row);
+  }
+}
+
 function show(name: Screen) {
   for (const [key, el] of Object.entries(screens)) {
     el.classList.toggle("hidden", key !== name);
@@ -496,18 +531,14 @@ document.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((btn) => {
   });
 });
 
-must("#btn-5v5").addEventListener("click", () => {
-  selectedFormat = "5v5";
-  show("diff");
-});
-must("#btn-1v1").addEventListener("click", () => {
-  selectedFormat = "1v1";
-  show("diff");
-});
+must("#tab-5v5").addEventListener("click", () => setFormat("5v5"));
+must("#tab-1v1").addEventListener("click", () => setFormat("1v1"));
+must("#btn-play").addEventListener("click", () => show("diff"));
 must("#btn-after-vote").addEventListener("click", () => show("heroes"));
 must("#btn-enter").addEventListener("click", enterMatch);
 must("#btn-lobby").addEventListener("click", leaveMatch);
 
+setFormat("5v5");
 renderDiff();
 renderMaps();
 renderRoster();
