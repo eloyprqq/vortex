@@ -10,7 +10,7 @@ import {
   type Aabb,
 } from "./arena";
 import { Fighter } from "./fighter";
-import { heroById, type HeroId } from "./heroes";
+import { HEROES, heroById, type HeroId } from "./heroes";
 import { Input } from "./input";
 import { sfx, unlockSfx } from "./sfx";
 import { difficultyById, type Difficulty, type DifficultyId } from "./difficulty";
@@ -39,7 +39,7 @@ type Field = {
   healRate: number;
 };
 
-export type MatchFormat = "5v5" | "1v1";
+export type MatchFormat = "5v5" | "1v1" | "practice";
 
 export const DUEL_KILLS = 5;
 
@@ -70,11 +70,12 @@ export type HudSnap = {
   hpBars: { id: string; x: number; y: number; health: number; maxHealth: number; ally: boolean }[];
   aliveAlly: number;
   aliveEnemy: number;
-  mode: "control" | "push";
+  mode: "control" | "push" | "practice";
   k: number;
   d: number;
   a: number;
   duel: boolean;
+  practice: boolean;
   enemyKills: number;
 };
 
@@ -122,10 +123,12 @@ export class Match {
   private map: MapDef;
   private diff: Difficulty;
   private duel = false;
+  private practice = false;
   result: "win" | "lose" | "draw" | null = null;
   onHud: (s: HudSnap) => void = () => {};
   onPause: (p: boolean) => void = () => {};
   onEnd: (r: "win" | "lose" | "draw") => void = () => {};
+  onLeave: () => void = () => {};
   onKill: (headshot: boolean) => void = () => {};
   onHit: (hit: { dmg: number; head: boolean; x: number; y: number }) => void = () => {};
   private robot = new THREE.Group();
@@ -133,11 +136,16 @@ export class Match {
   private pushLen = 0;
   private pushCum: number[] = [];
   private botNav = new Map<string, { x: number; z: number; stuck: number; side: number; avoid: number }>();
+  private dummyTrack = new Map<string, { x0: number; x1: number; z: number; y: number; t: number; speed: number }>();
+  private packs: { mesh: THREE.Group; pos: THREE.Vector3; big: boolean; wait: number; heal: number }[] = [];
+  private swapLatch = false;
+  private leaveLatch = false;
 
   constructor(canvas: HTMLCanvasElement, hero: HeroId, mapId: MapId, difficultyId: DifficultyId, format: MatchFormat = "5v5") {
     this.map = mapById(mapId);
     this.diff = difficultyById(difficultyId);
     this.duel = format === "1v1";
+    this.practice = format === "practice";
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
@@ -167,7 +175,25 @@ export class Match {
     this.player = new Fighter("you", "ally", hero, this.map.allySpawns[0]);
     this.scene.add(this.player.group);
     this.fighters.push(this.player);
-    if (this.duel) {
+    if (this.practice) {
+      this.map.enemySpawns.forEach((spawn, i) => {
+        const f = new Fighter(`dummy${i}`, "enemy", "soldier76", spawn, true);
+        this.scene.add(f.group);
+        this.fighters.push(f);
+        if (i >= 5) {
+          this.dummyTrack.set(f.id, {
+            x0: -7,
+            x1: 7,
+            z: spawn.z,
+            y: spawn.y,
+            t: i * 1.4,
+            speed: 0.7,
+          });
+        }
+      });
+      this.buildPacks();
+      this.decorateRange();
+    } else if (this.duel) {
       const all: HeroId[] = ["soldier76", "widowmaker", "nova"];
       const pool = all.filter((id) => id !== hero);
       const enemyHero = pool[Math.floor(Math.random() * pool.length)] ?? "soldier76";
@@ -271,15 +297,23 @@ export class Match {
     const dt = Math.min(this.clock.getDelta(), 0.05);
 
     if (!this.ended) {
-      this.timeLeft -= dt;
+      if (this.practice && this.input.keys.has("Escape")) {
+        if (!this.leaveLatch) {
+          this.leaveLatch = true;
+          this.onLeave();
+          return;
+        }
+      } else this.leaveLatch = false;
+      if (!this.practice) this.timeLeft -= dt;
       this.tickPlayer(dt);
       this.tickBots(dt);
       this.tickWorld(dt);
-      if (!this.duel) {
+      if (this.practice) this.tickPacks(dt);
+      else if (!this.duel) {
         if (this.map.kind === "push") this.tickPush(dt);
         else this.tickCapture(dt);
       }
-      if (this.timeLeft <= 0) this.finishByTime();
+      if (!this.practice && this.timeLeft <= 0) this.finishByTime();
     }
 
     this.updateCamera(dt);
@@ -308,6 +342,8 @@ export class Match {
     p.yaw -= this.input.mouseDX * 0.0022;
     p.pitch -= this.input.mouseDY * 0.0022;
     p.pitch = THREE.MathUtils.clamp(p.pitch, -1.45, 1.45);
+
+    if (this.practice) this.tickHeroSwap();
 
     this.controlHero(p, dt, true);
   }
@@ -1400,6 +1436,10 @@ export class Match {
   }
 
   private tickBots(dt: number) {
+    if (this.practice) {
+      this.tickPracticeBots(dt);
+      return;
+    }
     this.botThink -= dt;
     const think = this.botThink <= 0;
     if (think) this.botThink = 0.12;
@@ -1607,7 +1647,137 @@ export class Match {
     return !walls.length || walls[0].distance > dist - 0.4;
   }
 
+  private tickPracticeBots(dt: number) {
+    for (const f of this.fighters) {
+      if (f === this.player) continue;
+      if (!f.alive) {
+        f.respawn -= dt;
+        if (f.respawn <= 0) f.place();
+        continue;
+      }
+      const track = this.dummyTrack.get(f.id);
+      if (track) {
+        track.t += dt * track.speed;
+        const u = Math.sin(track.t) * 0.5 + 0.5;
+        f.group.position.x = THREE.MathUtils.lerp(track.x0, track.x1, u);
+        f.group.position.y = track.y;
+        f.group.position.z = track.z;
+        f.vel.set(0, 0, 0);
+      } else {
+        f.botMoveX = 0;
+        f.botMoveZ = 0;
+      }
+      this.faceToward(f, this.player.group.position);
+      f.pitch = 0;
+      f.group.rotation.y = f.yaw;
+    }
+  }
+
+  private tickHeroSwap() {
+    const keys = this.input.keys;
+    let next: HeroId | null = null;
+    if (keys.has("Digit1") || keys.has("Numpad1")) next = "soldier76";
+    else if (keys.has("Digit2") || keys.has("Numpad2")) next = "widowmaker";
+    else if (keys.has("Digit3") || keys.has("Numpad3")) next = "nova";
+    else if (keys.has("KeyH")) {
+      if (!this.swapLatch) {
+        const ids = HEROES.map((h) => h.id);
+        next = ids[(ids.indexOf(this.player.heroId) + 1) % ids.length];
+      }
+      this.swapLatch = true;
+    } else this.swapLatch = false;
+    if (next && next !== this.player.heroId) this.swapPlayerHero(next);
+  }
+
+  private swapPlayerHero(hero: HeroId) {
+    this.player.setHero(hero);
+    this.player.place(this.map.allySpawns[0]);
+    this.hideOwnBody();
+    while (this.viewGun.children.length) this.viewGun.remove(this.viewGun.children[0]);
+    this.shapeViewGun(hero);
+    this.viewAct = "idle";
+    this.viewActT = 0;
+    this.fieldArmed = false;
+  }
+
+  private buildPacks() {
+    const plus = (big: boolean) => {
+      const g = new THREE.Group();
+      const color = big ? 0xffd24a : 0xf4f7fb;
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: big ? 0.85 : 0.55,
+        roughness: 0.35,
+      });
+      const arm = big ? 0.55 : 0.34;
+      const thick = big ? 0.12 : 0.08;
+      const a = new THREE.Mesh(new THREE.BoxGeometry(arm, thick, thick), mat);
+      const b = new THREE.Mesh(new THREE.BoxGeometry(thick, arm, thick), mat);
+      g.add(a, b);
+      return g;
+    };
+    const spots: [number, number, number, boolean][] = [
+      [0, 2.4, 16.4, false],
+      [4.2, 0, 6.2, false],
+      [-5.4, 0, -1.6, true],
+      [10.2, 0, -5.4, false],
+    ];
+    for (const [x, y, z, big] of spots) {
+      const mesh = plus(big);
+      mesh.position.set(x, y + 0.7, z);
+      this.scene.add(mesh);
+      this.packs.push({
+        mesh,
+        pos: new THREE.Vector3(x, y, z),
+        big,
+        wait: 0,
+        heal: big ? 250 : 75,
+      });
+    }
+  }
+
+  private tickPacks(dt: number) {
+    const p = this.player;
+    for (const pack of this.packs) {
+      pack.mesh.rotation.y += dt * 1.6;
+      pack.mesh.position.y = pack.pos.y + 0.7 + Math.sin(this.clock.elapsedTime * 2.4) * 0.08;
+      if (pack.wait > 0) {
+        pack.wait -= dt;
+        pack.mesh.visible = pack.wait <= 0;
+        continue;
+      }
+      if (!p.alive) continue;
+      const dx = p.group.position.x - pack.pos.x;
+      const dz = p.group.position.z - pack.pos.z;
+      const dy = p.group.position.y - pack.pos.y;
+      if (dx * dx + dz * dz > 1.15 * 1.15 || Math.abs(dy) > 2.2) continue;
+      if (p.health >= p.maxHealth) continue;
+      p.health = Math.min(p.maxHealth, p.health + pack.heal);
+      pack.wait = pack.big ? 15 : 10;
+      pack.mesh.visible = false;
+    }
+  }
+
+  private decorateRange() {
+    const stripe = new THREE.Mesh(
+      new THREE.RingGeometry(8.6, 9.15, 48),
+      new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide }),
+    );
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(0, 0.64, -8);
+    this.scene.add(stripe);
+    const lane = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.2, 18),
+      new THREE.MeshStandardMaterial({ color: 0x5c6e86, roughness: 0.95 }),
+    );
+    lane.rotation.x = -Math.PI / 2;
+    lane.position.set(0, 0.04, 1);
+    this.scene.add(lane);
+  }
+
   private spawnWait(f: Fighter) {
+    if (this.practice) return f === this.player ? 3 : 1.4;
     if (f === this.player) return this.diff.playerRespawn;
     if (f.team === "enemy") return this.diff.enemyRespawn;
     return this.diff.allyRespawn;
@@ -1747,7 +1917,7 @@ export class Match {
     });
     let ally = 0;
     let enemy = 0;
-    if (!this.duel) {
+    if (!this.duel && !this.practice) {
       for (const f of this.fighters) {
         if (!f.alive) continue;
         if (this.map.kind === "push") {
@@ -1786,7 +1956,9 @@ export class Match {
       sprint: p.sprinting,
       fly: p.flyT > 0,
       hero: p.heroId,
-      obj: this.duel
+      obj: this.practice
+        ? "훈련장"
+        : this.duel
         ? `1v1 · ${DUEL_KILLS}킬 선승`
         : this.map.kind === "push"
           ? ally && enemy
@@ -1809,7 +1981,9 @@ export class Match {
       contested: ally > 0 && enemy > 0,
       hint: p.alive
         ? this.input.locked
-          ? ""
+          ? this.practice
+            ? "H 히어로 변경 · 1 솔저 · 2 위도우 · 3 노바 · ESC 로비"
+            : ""
           : "클릭해서 조준 잠금"
         : `${p.respawn.toFixed(1)}초 후 리스폰`,
       crosshairHot: hot,
@@ -1822,6 +1996,7 @@ export class Match {
       d: p.deaths,
       a: p.assists,
       duel: this.duel,
+      practice: this.practice,
       enemyKills: this.fighters.find((f) => f.team === "enemy")?.kills ?? 0,
     });
   }

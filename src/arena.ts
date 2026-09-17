@@ -92,28 +92,30 @@ export function buildArena(
   scene.add(floor);
   meshes.push(floor);
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(map.captureR - 0.14, map.captureR + 0.1, 64),
-    new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.03;
-  scene.add(ring);
-  meshes.push(ring);
+  if (map.kind !== "practice") {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(map.captureR - 0.14, map.captureR + 0.1, 64),
+      new THREE.MeshBasicMaterial({ color: 0xf5c518, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    scene.add(ring);
+    meshes.push(ring);
 
-  const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(map.captureR - 0.18, 48),
-    new THREE.MeshStandardMaterial({
-      color: 0x24344c,
-      roughness: 0.8,
-      emissive: 0x1a1404,
-      emissiveIntensity: 0.25,
-    }),
-  );
-  pad.rotation.x = -Math.PI / 2;
-  pad.position.y = 0.02;
-  scene.add(pad);
-  meshes.push(pad);
+    const pad = new THREE.Mesh(
+      new THREE.CircleGeometry(map.captureR - 0.18, 48),
+      new THREE.MeshStandardMaterial({
+        color: 0x24344c,
+        roughness: 0.8,
+        emissive: 0x1a1404,
+        emissiveIntensity: 0.25,
+      }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.02;
+    scene.add(pad);
+    meshes.push(pad);
+  }
 
   const boxMat = new THREE.MeshStandardMaterial({ color: map.block, roughness: 0.82 });
   const nestMat = new THREE.MeshStandardMaterial({ color: map.nest, roughness: 0.78 });

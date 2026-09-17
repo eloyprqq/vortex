@@ -515,6 +515,14 @@ body.playing #vignette {
   gap: 4px;
 }
 
+#hud.practice #caps {
+  display: none;
+}
+
+#hud.practice #clock {
+  letter-spacing: 0.28em;
+}
+
 .cap {
   height: 8px;
   background: #1a2433;

@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 export type Spawn = { x: number; y: number; z: number; yaw: number };
 
-export type MapId = "horizon" | "streets" | "ruins";
+export type MapId = "horizon" | "streets" | "ruins" | "range";
 
 export type Prop = {
   x: number;
@@ -19,7 +19,7 @@ export type MapDef = {
   name: string;
   nameEn: string;
   mode: string;
-  kind: "control" | "push";
+  kind: "control" | "push" | "practice";
   place: string;
   blurb: string;
   art: string;
@@ -60,7 +60,7 @@ function nest(zSign: number): Prop[] {
   ];
 }
 
-export const MAPS: MapDef[] = [
+export const MAPS: Array<MapDef & { id: Exclude<MapId, "range"> }> = [
   {
     id: "horizon",
     name: "궤도 관측소",
@@ -197,7 +197,71 @@ export const MAPS: MapDef[] = [
   },
 ];
 
+export const RANGE_MAP: MapDef = {
+  id: "range",
+  name: "훈련장",
+  nameEn: "PRACTICE RANGE",
+  mode: "훈련",
+  kind: "practice",
+  place: "연습 시설",
+  blurb: "더미 봇과 체력팩. 시간 제한 없이 스킬을 연습한다.",
+  art: "range",
+  captureR: 0,
+  floorR: 38,
+  bound: 26,
+  fogNear: 28,
+  fogFar: 90,
+  floor: 0x6a7c94,
+  block: 0x8b9cb0,
+  nest: 0xc4a46a,
+  skyTop: 0x5d7ea8,
+  skyLow: 0xc5d4e6,
+  allySpawns: [{ x: 0, y: 2.4, z: 18.2, yaw: 0 }],
+  enemySpawns: [
+    { x: -8, y: 0.62, z: -8, yaw: Math.PI },
+    { x: -4, y: 0.62, z: -8, yaw: Math.PI },
+    { x: 0, y: 0.62, z: -8, yaw: Math.PI },
+    { x: 4, y: 0.62, z: -8, yaw: Math.PI },
+    { x: 8, y: 0.62, z: -8, yaw: Math.PI },
+    { x: -6, y: 1.05, z: -16.2, yaw: Math.PI },
+    { x: 0, y: 1.05, z: -16.2, yaw: Math.PI },
+    { x: 6, y: 1.05, z: -16.2, yaw: Math.PI },
+  ],
+  allyPerch: new THREE.Vector3(-12, 4.2, 4),
+  enemyPerch: new THREE.Vector3(12, 3.2, -10),
+  props: [
+    { x: 0, y: 2.4, z: 18.5, w: 10, h: 0.4, d: 7.2, nest: true },
+    { x: 0, y: 3.8, z: 22, w: 10, h: 2.8, d: 0.45, nest: true },
+    { x: -5, y: 3.8, z: 18.5, w: 0.45, h: 2.8, d: 7.2, nest: true },
+    { x: 5, y: 3.8, z: 18.5, w: 0.45, h: 2.8, d: 7.2, nest: true },
+    { x: 0, y: 5.1, z: 18.5, w: 10.4, h: 0.28, d: 7.4, nest: true },
+    { x: -1.8, y: 0.5, z: 14.2, w: 2.2, h: 1, d: 1.8 },
+    { x: -1.8, y: 1.3, z: 13.1, w: 2.2, h: 1, d: 1.8 },
+    { x: -1.8, y: 2.1, z: 12, w: 2.2, h: 1, d: 1.8 },
+    { x: 0, y: 0.3, z: -8, w: 18, h: 0.6, d: 4.2, nest: true },
+    { x: 0, y: 0.52, z: -16.2, w: 16, h: 1.04, d: 2.4 },
+    { x: -9.2, y: 1.6, z: -16.2, w: 0.35, h: 3.2, d: 2.6 },
+    { x: 9.2, y: 1.6, z: -16.2, w: 0.35, h: 3.2, d: 2.6 },
+    { x: 0, y: 3.1, z: -17.3, w: 18.4, h: 0.28, d: 0.35 },
+    { x: 3.6, y: 0.7, z: 2.2, w: 2.4, h: 1.4, d: 1.6 },
+    { x: -3.6, y: 0.7, z: 1.4, w: 2.4, h: 1.4, d: 1.6 },
+    { x: 0, y: 0.55, z: 5.5, w: 3.2, h: 1.1, d: 1.2 },
+    { x: -12, y: 0.55, z: 6, w: 3.2, h: 1.1, d: 2.4 },
+    { x: -12, y: 1.45, z: 3.4, w: 3.2, h: 1.1, d: 2.2 },
+    { x: -12, y: 2.35, z: 0.8, w: 3.2, h: 1.1, d: 2.2 },
+    { x: -12, y: 3.25, z: -1.8, w: 3.2, h: 1.1, d: 2.2 },
+    { x: -12, y: 4.2, z: 4.2, w: 3.6, h: 0.35, d: 3.4, nest: true },
+    { x: 12, y: 1.2, z: -4, w: 3.4, h: 2.4, d: 6 },
+    { x: 12, y: 1.2, z: -12, w: 2.6, h: 2.4, d: 3.2 },
+    { x: 27, y: 4, z: 0, w: 0.8, h: 8, d: 56 },
+    { x: -27, y: 4, z: 0, w: 0.8, h: 8, d: 56 },
+    { x: 0, y: 4, z: 27, w: 56, h: 8, d: 0.8 },
+    { x: 0, y: 4, z: -27, w: 56, h: 8, d: 0.8 },
+  ],
+};
+
 export function mapById(id: MapId): MapDef {
+  if (id === "range") return RANGE_MAP;
   const m = MAPS.find((x) => x.id === id);
   if (!m) throw new Error(id);
   return m;

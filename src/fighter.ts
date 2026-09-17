@@ -7,7 +7,8 @@ export type Team = "ally" | "enemy";
 export class Fighter {
   readonly id: string;
   readonly team: Team;
-  readonly heroId: HeroId;
+  heroId: HeroId;
+  readonly dummy: boolean;
   readonly group = new THREE.Group();
   readonly vel = new THREE.Vector3();
   readonly radius = 0.38;
@@ -54,17 +55,29 @@ export class Fighter {
   assists = 0;
   hits: { id: string; team: Team; t: number }[] = [];
 
-  constructor(id: string, team: Team, heroId: HeroId, spawn: Spawn) {
+  constructor(id: string, team: Team, heroId: HeroId, spawn: Spawn, dummy = false) {
     this.id = id;
     this.team = team;
     this.heroId = heroId;
+    this.dummy = dummy;
     this.spawn = spawn;
+    const def = heroById(heroId);
+    this.maxHealth = dummy ? 200 : def.health;
+    this.health = this.maxHealth;
+    this.resetLoadout();
+    if (dummy) this.buildDummy();
+    else this.buildMesh(def.color, def.accent);
+    this.place(spawn);
+  }
+
+  setHero(heroId: HeroId) {
+    this.heroId = heroId;
     const def = heroById(heroId);
     this.maxHealth = def.health;
     this.health = def.health;
-    this.resetLoadout();
+    while (this.group.children.length) this.group.remove(this.group.children[0]);
     this.buildMesh(def.color, def.accent);
-    this.place(spawn);
+    this.resetLoadout();
   }
 
   resetLoadout() {
@@ -129,6 +142,46 @@ export class Fighter {
   lookDir(out: THREE.Vector3) {
     const cp = Math.cos(this.pitch);
     return out.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+  }
+
+  private buildDummy() {
+    this.height = 1.7;
+    const shell = new THREE.MeshStandardMaterial({
+      color: 0xd4782a,
+      roughness: 0.45,
+      metalness: 0.18,
+    });
+    const pale = new THREE.MeshStandardMaterial({ color: 0xe8e2d2, roughness: 0.55 });
+    this.body = new THREE.Mesh(new THREE.CapsuleGeometry(0.38, 1.02, 6, 12), shell);
+    this.body.position.y = this.height * 0.5;
+    this.body.userData.hit = this;
+    this.body.userData.part = "body";
+    this.group.add(this.body);
+
+    this.outline = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.44, 1.08, 8, 14),
+      new THREE.MeshBasicMaterial({ color: 0xff7a2a, side: THREE.BackSide, depthWrite: false }),
+    );
+    this.outline.position.y = this.height * 0.5;
+    this.outline.scale.setScalar(1.06);
+    this.outline.renderOrder = 9;
+    this.group.add(this.outline);
+
+    this.head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), pale);
+    this.head.position.y = this.height - 0.12;
+    this.head.userData.hit = this;
+    this.head.userData.part = "head";
+    this.group.add(this.head);
+
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.38), pale);
+    chest.position.y = 1.02;
+    this.group.add(chest);
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.36, 0.1, 0.08),
+      new THREE.MeshStandardMaterial({ color: 0x1a1a1a, emissive: 0x331408, emissiveIntensity: 0.4 }),
+    );
+    visor.position.set(0, this.height - 0.08, -0.2);
+    this.group.add(visor);
   }
 
   private buildMesh(color: number, accent: number) {

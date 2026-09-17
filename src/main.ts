@@ -21,8 +21,8 @@ let selected: HeroId = "soldier76";
 let selectedMap: MapId = "horizon";
 let selectedDiff: DifficultyId = "easy";
 let selectedFormat: MatchFormat = "5v5";
-let playerVote: MapId | null = null;
-const votes: Record<MapId, number> = { horizon: 0, streets: 0, ruins: 0 };
+let playerVote: Exclude<MapId, "range"> | null = null;
+const votes: Record<Exclude<MapId, "range">, number> = { horizon: 0, streets: 0, ruins: 0 };
 let votePhase: "idle" | "voting" | "spin" | "done" = "idle";
 let voteLeft = 8;
 let voteTick: number | null = null;
@@ -47,15 +47,27 @@ function setFormat(fmt: MatchFormat) {
   selectedFormat = fmt;
   must("#tab-5v5").classList.toggle("on", fmt === "5v5");
   must("#tab-1v1").classList.toggle("on", fmt === "1v1");
-  must("#play-title").textContent = fmt === "1v1" ? "1V1" : "5V5";
-  must("#play-lede").textContent =
-    fmt === "1v1" ? `${DUEL_KILLS}킬 선승. 적 봇 한 명.` : "아군 봇 4명과 적 봇 5명.";
-  must("#squad-count").textContent = fmt === "1v1" ? "1 / 2" : "1 / 6";
+  must("#tab-range").classList.toggle("on", fmt === "practice");
+  if (fmt === "practice") {
+    selectedMap = "range";
+    must("#play-kicker").textContent = "훈련";
+    must("#play-title").textContent = "훈련장";
+    must("#play-lede").textContent = "더미 봇 · 체력팩 · 시간 제한 없음.";
+    must("#squad-count").textContent = "1 / 1";
+    must("#play-hint").textContent = "히어로만 고르고 바로 들어간다";
+  } else {
+    must("#play-kicker").textContent = "봇전";
+    must("#play-title").textContent = fmt === "1v1" ? "1V1" : "5V5";
+    must("#play-lede").textContent =
+      fmt === "1v1" ? `${DUEL_KILLS}킬 선승. 적 봇 한 명.` : "아군 봇 4명과 적 봇 5명.";
+    must("#squad-count").textContent = fmt === "1v1" ? "1 / 2" : "1 / 6";
+    must("#play-hint").textContent = "히어로는 맵 고른 뒤 고른다";
+  }
   renderSquad();
 }
 
 function renderSquad() {
-  const n = selectedFormat === "1v1" ? 2 : 6;
+  const n = selectedFormat === "practice" ? 1 : selectedFormat === "1v1" ? 2 : 6;
   const list = must("#squad-list");
   list.replaceChildren();
   for (let i = 0; i < n; i++) {
@@ -85,12 +97,21 @@ function show(name: Screen) {
   if (name === "maps") startVote();
   if (name !== "maps") stopVoteTimers();
   if (name === "heroes") {
-    const m = mapById(selectedMap);
-    const diffName = DIFFICULTIES.find((d) => d.id === selectedDiff)?.name;
-    must("#hero-map-copy").textContent =
-      selectedFormat === "1v1"
-        ? `1v1 · ${DUEL_KILLS}킬 선승 · ${m.name} · ${diffName}`
-        : `${m.mode} · ${m.name} · ${diffName}. 힐러 노바가 양 팀에 들어간다.`;
+    const back = must<HTMLButtonElement>("#btn-hero-back");
+    if (selectedFormat === "practice") {
+      must("#hero-map-copy").textContent = "훈련장. 더미 봇은 쏘지 않는다. H로 히어로를 바꾼다.";
+      back.dataset.go = "home";
+      back.textContent = "로비";
+    } else {
+      const m = mapById(selectedMap);
+      const diffName = DIFFICULTIES.find((d) => d.id === selectedDiff)?.name;
+      must("#hero-map-copy").textContent =
+        selectedFormat === "1v1"
+          ? `1v1 · ${DUEL_KILLS}킬 선승 · ${m.name} · ${diffName}`
+          : `${m.mode} · ${m.name} · ${diffName}. 힐러 노바가 양 팀에 들어간다.`;
+      back.dataset.go = "maps";
+      back.textContent = "맵";
+    }
   }
 }
 
@@ -352,11 +373,16 @@ function fmtTime(s: number) {
 }
 
 function paintHud(h: HudSnap) {
-  must("#clock").textContent = fmtTime(h.time);
+  must("#hud").classList.toggle("practice", h.practice);
+  must("#clock").textContent = h.practice ? "훈련" : fmtTime(h.time);
   must("#ally-bar").style.width = `${h.allyCap}%`;
   must("#enemy-bar").style.width = `${h.enemyCap}%`;
-  must("#obj-label").textContent = h.duel ? `${h.k} - ${h.enemyKills}` : h.obj;
-  must("#team-count").textContent = h.duel ? `1v1 · ${DUEL_KILLS}킬 선승` : `${h.aliveAlly} vs ${h.aliveEnemy}`;
+  must("#obj-label").textContent = h.practice ? "훈련장" : h.duel ? `${h.k} - ${h.enemyKills}` : h.obj;
+  must("#team-count").textContent = h.practice
+    ? "H 히어로 · ESC 로비"
+    : h.duel
+      ? `1v1 · ${DUEL_KILLS}킬 선승`
+      : `${h.aliveAlly} vs ${h.aliveEnemy}`;
   paintOwBar(must("#health-bar"), h.health, h.maxHealth);
   must("#health-num").textContent = `${Math.ceil(h.health)} / ${h.maxHealth}`;
   paintHpFloats(h.hpBars);
@@ -464,6 +490,7 @@ function leaveMatch() {
   document.body.classList.remove("playing");
   must("#hud").classList.add("hidden");
   must("#hud").classList.remove("infra");
+  must("#hud").classList.remove("practice");
   must("#crosshair").classList.remove("hit", "head");
   must("#dmg-layer").replaceChildren();
   window.clearTimeout(killMarkTimer);
@@ -485,6 +512,7 @@ function enterMatch() {
   closeOverlay();
   unlockSfx();
   match = new Match(canvas, selected, selectedMap, selectedDiff, selectedFormat);
+  match.onLeave = leaveMatch;
   match.onHud = paintHud;
   match.onHit = (hit) => {
     const xhair = must("#crosshair");
@@ -533,7 +561,13 @@ document.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((btn) => {
 
 must("#tab-5v5").addEventListener("click", () => setFormat("5v5"));
 must("#tab-1v1").addEventListener("click", () => setFormat("1v1"));
-must("#btn-play").addEventListener("click", () => show("diff"));
+must("#tab-range").addEventListener("click", () => setFormat("practice"));
+must("#btn-play").addEventListener("click", () => {
+  if (selectedFormat === "practice") {
+    selectedMap = "range";
+    show("heroes");
+  } else show("diff");
+});
 must("#btn-after-vote").addEventListener("click", () => show("heroes"));
 must("#btn-enter").addEventListener("click", enterMatch);
 must("#btn-lobby").addEventListener("click", leaveMatch);

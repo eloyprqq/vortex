@@ -18,6 +18,7 @@
         <nav class="ow-tabs" aria-label="모드">
           <button type="button" class="ow-tab on" id="tab-5v5">5v5</button>
           <button type="button" class="ow-tab" id="tab-1v1">1v1</button>
+          <button type="button" class="ow-tab" id="tab-range">훈련장</button>
         </nav>
       </header>
 
@@ -35,7 +36,7 @@
           <div id="squad-list"></div>
         </aside>
         <footer class="play-bar">
-          <span class="play-hint">히어로는 맵 고른 뒤 고른다</span>
+          <span class="play-hint" id="play-hint">히어로는 맵 고른 뒤 고른다</span>
           <button type="button" id="btn-play">플레이</button>
         </footer>
       </section>
@@ -74,7 +75,7 @@
         <div class="roster" id="roster"></div>
         <nav class="menu">
           <button type="button" id="btn-enter">출전</button>
-          <button type="button" data-go="maps" class="ghost">맵</button>
+          <button type="button" id="btn-hero-back" data-go="maps" class="ghost">맵</button>
         </nav>
         <p class="hint">
           1인칭 · WASD · 마우스 · Space · R<br />
